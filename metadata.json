@@ -1,0 +1,6 @@
+{
+  "name": "Wastitama | Modul UPG Tingkat II",
+  "description": "Sistem Pengendalian Gratifikasi (Wastitama) Modul UPG Tingkat II Badan Pengawasan Mahkamah Agung Republik Indonesia.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

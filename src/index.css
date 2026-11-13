@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+:root {
+  --blue: #1762b5;
+  --blue2: #0d559f;
+  --cyan: #08a9c4;
+  --ink: #243247;
+  --muted: #718096;
+  --line: #dce3eb;
+  --bg: #f3f6fa;
+  --white: #ffffff;
+  --green: #198754;
+  --amber: #d99116;
+  --red: #dc3545;
+}
+
+@layer base {
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    color: var(--ink);
+    font-family: "Plus Jakarta Sans", "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .font-mono-num {
+    font-family: "JetBrains Mono", monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
