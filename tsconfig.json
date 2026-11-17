@@ -24,15 +24,5 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "exclude": [
-    "dist",
-    "src/data/ppgData.ts",
-    "src/components/RiskLibraryModal.tsx",
-    "src/components/RiskMatrixConfigModal.tsx",
-    "src/components/pages/AuditKinerjaPage.tsx",
-    "src/components/pages/DashboardPPGPage.tsx",
-    "src/components/pages/MonevPPGPage.tsx",
-    "src/components/pages/PengawasanRegulerPage.tsx",
-    "src/components/pages/PenilaianRisikoPage.tsx"
-  ]
+  "exclude": ["dist"]
 }

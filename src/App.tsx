@@ -5,43 +5,57 @@
 
 import { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { DashboardPage } from './components/pages/DashboardPage';
-import { EvaluasiSatkerPage } from './components/pages/EvaluasiSatkerPage';
-import { LaporanPage } from './components/pages/LaporanPage';
-import { MonitoringPage } from './components/pages/MonitoringPage';
-import { PenilaianMandiriPage } from './components/pages/PenilaianMandiriPage';
-import { RekapitulasiPage } from './components/pages/RekapitulasiPage';
+import { AuditKinerjaPage } from './components/pages/AuditKinerjaPage';
+import { DashboardPPGPage } from './components/pages/DashboardPPGPage';
+import { MonevPPGPage } from './components/pages/MonevPPGPage';
+import { PengawasanRegulerPage } from './components/pages/PengawasanRegulerPage';
+import { PenilaianRisikoPage } from './components/pages/PenilaianRisikoPage';
 import {
-  createInitialMonitoringDetails,
-  createInitialSatkerState,
-  downloadCSV,
+  createDefaultRiskMatrix,
+  INITIAL_AUDIT_KINERJA,
+  INITIAL_PENGAWASAN_REGULER,
   PAGE_META,
-} from './data/upgData';
+} from './data/ppgData';
 import {
-  MonitoringDetail,
-  MonitoringDetailsMap,
+  AnnualEvalSatkerRecord,
+  AuditKinerjaItem,
+  MonevSatkerRecord,
   PageId,
-  SatkerEvaluation,
-  SatkerStateMap,
-  SelfScoreEntry,
-  SelfScoresMap,
+  PengawasanRegulerItem,
+  RiskAssessmentRecord,
+  RiskMatrixConfig,
+  UserRole,
 } from './types/upg';
 
-const STORAGE_KEY = 'wastitama_upg_tingkat_ii_state_v1';
+const STORAGE_KEY = 'wastitama_ppg_integrated_state_v2';
 
 interface PersistedState {
   year: string;
-  details: MonitoringDetailsMap;
-  selfScores: SelfScoresMap;
-  satState: SatkerStateMap;
+  userRole: UserRole;
+  assessments: RiskAssessmentRecord[];
+  riskMatrix: RiskMatrixConfig;
+  monevRecords: Record<string, MonevSatkerRecord>;
+  annualRecords: Record<string, AnnualEvalSatkerRecord>;
+  pengawasanReguler: PengawasanRegulerItem[];
+  auditKinerja: AuditKinerjaItem[];
+}
+
+function normalizeUserRole(raw: unknown): UserRole {
+  if (raw === 'UPG Pusat' || raw === 'PPG Pusat') return 'UPG Pusat';
+  if (raw === 'Satker' || raw === 'Pemantau (Read-Only)') return 'Satker';
+  return 'UPG Tingkat 2';
 }
 
 function loadInitialState(): PersistedState {
   const fallback: PersistedState = {
     year: '2026',
-    details: createInitialMonitoringDetails(),
-    selfScores: {},
-    satState: createInitialSatkerState(),
+    userRole: 'UPG Tingkat 2',
+    assessments: [],
+    riskMatrix: createDefaultRiskMatrix(),
+    monevRecords: {},
+    annualRecords: {},
+    pengawasanReguler: INITIAL_PENGAWASAN_REGULER,
+    auditKinerja: INITIAL_AUDIT_KINERJA,
   };
 
   try {
@@ -50,13 +64,19 @@ function loadInitialState(): PersistedState {
     const parsed = JSON.parse(raw) as Partial<PersistedState>;
     return {
       year: parsed.year || '2026',
-      details: parsed.details
-        ? { ...fallback.details, ...parsed.details }
-        : fallback.details,
-      selfScores: parsed.selfScores ?? {},
-      satState: parsed.satState
-        ? { ...fallback.satState, ...parsed.satState }
-        : fallback.satState,
+      userRole: normalizeUserRole(parsed.userRole),
+      assessments: Array.isArray(parsed.assessments) ? parsed.assessments : [],
+      riskMatrix: parsed.riskMatrix?.grid
+        ? parsed.riskMatrix
+        : fallback.riskMatrix,
+      monevRecords: parsed.monevRecords ?? {},
+      annualRecords: parsed.annualRecords ?? {},
+      pengawasanReguler: Array.isArray(parsed.pengawasanReguler)
+        ? parsed.pengawasanReguler
+        : fallback.pengawasanReguler,
+      auditKinerja: Array.isArray(parsed.auditKinerja)
+        ? parsed.auditKinerja
+        : fallback.auditKinerja,
     };
   } catch {
     return fallback;
@@ -65,140 +85,279 @@ function loadInitialState(): PersistedState {
 
 export default function App() {
   const [initial] = useState<PersistedState>(() => loadInitialState());
-  const [activePage, setActivePage] = useState<PageId>('dashboard');
+  const [userRole, setUserRole] = useState<UserRole>(initial.userRole);
+  const [activePage, setActivePage] = useState<PageId>(() =>
+    initial.userRole === 'Satker' ? 'ppg-risiko' : 'ppg-dashboard'
+  );
   const [year, setYear] = useState<string>(initial.year);
-  const [details, setDetails] = useState<MonitoringDetailsMap>(initial.details);
-  const [selfScores, setSelfScores] = useState<SelfScoresMap>(initial.selfScores);
-  const [satState, setSatState] = useState<SatkerStateMap>(initial.satState);
+  const [assessments, setAssessments] = useState<RiskAssessmentRecord[]>(
+    initial.assessments
+  );
+  const [riskMatrix, setRiskMatrix] = useState<RiskMatrixConfig>(
+    initial.riskMatrix
+  );
+  const [monevRecords, setMonevRecords] = useState<
+    Record<string, MonevSatkerRecord>
+  >(initial.monevRecords);
+  const [annualRecords, setAnnualRecords] = useState<
+    Record<string, AnnualEvalSatkerRecord>
+  >(initial.annualRecords);
+  const [pengawasanReguler, setPengawasanReguler] = useState<
+    PengawasanRegulerItem[]
+  >(initial.pengawasanReguler);
+  const [auditKinerja, setAuditKinerja] = useState<AuditKinerjaItem[]>(
+    initial.auditKinerja
+  );
+
+  // Pre-selected target when clicking Edit from Dashboard PPG
+  const [riskEditTarget, setRiskEditTarget] = useState<{
+    satkerUniqueId: string;
+    riskCode?: string;
+  } | null>(null);
 
   useEffect(() => {
     try {
-      const payload: PersistedState = { year, details, selfScores, satState };
+      const payload: PersistedState = {
+        year,
+        userRole,
+        assessments,
+        riskMatrix,
+        monevRecords,
+        annualRecords,
+        pengawasanReguler,
+        auditKinerja,
+      };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch {
       // Ignore storage quota errors
     }
-  }, [year, details, selfScores, satState]);
+  }, [
+    year,
+    userRole,
+    assessments,
+    riskMatrix,
+    monevRecords,
+    annualRecords,
+    pengawasanReguler,
+    auditKinerja,
+  ]);
 
-  const handleUpdateDetail = (key: string, detail: MonitoringDetail) => {
-    setDetails((prev) => ({
+  const handleSaveAssessment = (record: RiskAssessmentRecord) => {
+    setAssessments((prev) => {
+      const existsIdx = prev.findIndex((a) => a.id === record.id);
+      if (existsIdx >= 0) {
+        const next = [...prev];
+        next[existsIdx] = record;
+        return next;
+      }
+      return [...prev, record];
+    });
+  };
+
+  const handleSaveMonev = (record: MonevSatkerRecord) => {
+    setMonevRecords((prev) => ({
       ...prev,
-      [key]: detail,
+      [record.key]: record,
     }));
   };
 
-  const handleSaveScore = (code: string, entry: SelfScoreEntry) => {
-    setSelfScores((prev) => ({
+  const handleSaveAnnualRecord = (record: AnnualEvalSatkerRecord) => {
+    setAnnualRecords((prev) => ({
       ...prev,
-      [code]: entry,
+      [record.key]: record,
     }));
   };
 
-  const handleSaveSatker = (satkerName: string, evaluation: SatkerEvaluation) => {
-    setSatState((prev) => ({
-      ...prev,
-      [satkerName]: evaluation,
-    }));
+  const handleUpdatePengawasan = (updated: PengawasanRegulerItem) => {
+    setPengawasanReguler((prev) =>
+      prev.map((item) => (item.id === updated.id ? updated : item))
+    );
   };
 
-  const meta = PAGE_META[activePage];
+  const handleUpdateAuditKinerja = (updated: AuditKinerjaItem) => {
+    setAuditKinerja((prev) =>
+      prev.map((item) => (item.id === updated.id ? updated : item))
+    );
+  };
+
+  const canViewEvaluatorPages =
+    userRole === 'UPG Tingkat 2' || userRole === 'UPG Pusat';
+
+  const handleRoleChange = (nextRole: UserRole) => {
+    setUserRole(nextRole);
+    if (
+      nextRole === 'Satker' &&
+      (activePage === 'ppg-dashboard' || activePage === 'ppg-monev')
+    ) {
+      setActivePage('ppg-risiko');
+    }
+  };
+
+  const handleNavigate = (page: PageId) => {
+    if (
+      !canViewEvaluatorPages &&
+      (page === 'ppg-dashboard' || page === 'ppg-monev')
+    ) {
+      setActivePage('ppg-risiko');
+      return;
+    }
+    if (page !== 'ppg-risiko') {
+      setRiskEditTarget(null);
+    }
+    setActivePage(page);
+  };
+
+  const handleOpenRiskFormForSatker = (
+    satkerUniqueId: string,
+    riskCode?: string
+  ) => {
+    setRiskEditTarget({ satkerUniqueId, riskCode });
+    setActivePage('ppg-risiko');
+  };
+
+  const handleOpenNewRiskForm = () => {
+    setRiskEditTarget(null);
+    setActivePage('ppg-risiko');
+  };
+
+  const effectivePage: PageId =
+    !canViewEvaluatorPages &&
+    (activePage === 'ppg-dashboard' || activePage === 'ppg-monev')
+      ? 'ppg-risiko'
+      : activePage;
+
+  const meta = PAGE_META[effectivePage];
+  const isPpgPage =
+    effectivePage === 'ppg-risiko' ||
+    effectivePage === 'ppg-dashboard' ||
+    effectivePage === 'ppg-monev';
+
+  const roleBadgeInitial =
+    userRole === 'UPG Tingkat 2' ? 'T2' : userRole === 'UPG Pusat' ? 'U' : 'S';
+  const roleSubtitle =
+    userRole === 'UPG Tingkat 2'
+      ? 'Evaluator UPG Tingkat 3'
+      : userRole === 'UPG Pusat'
+        ? 'Monitoring & Monev UPG Pusat'
+        : 'Input Penilaian Risiko Satker';
 
   return (
     <div className="flex min-h-screen max-md:block">
-      <Sidebar activePage={activePage} onNavigate={setActivePage} />
+      <Sidebar
+        activePage={effectivePage}
+        userRole={userRole}
+        onNavigate={handleNavigate}
+      />
 
       <main className="min-w-0 flex-1">
         {/* Topbar */}
-        <header className="flex h-[66px] items-center justify-between border-b border-[#dce3eb] bg-white px-7 max-md:px-3.5">
+        <header className="flex min-h-[66px] flex-wrap items-center justify-between gap-3 border-b border-[#dce3eb] bg-white px-7 py-2 max-md:px-3.5">
           <div className="text-[14px] text-[#6c7b8c]">
             Wastitama / <b className="text-[#243247]">{meta.crumb}</b>
           </div>
 
-          <div className="flex items-center gap-2.5 font-bold">
-            <div className="grid h-[34px] w-[34px] place-items-center rounded-full bg-[#e7f0fc] text-[14px] font-bold text-[#1762b5]">
-              A
-            </div>
-            <div className="leading-tight">
-              <div className="text-[14px] font-bold text-[#243247]">
-                Auditor / Evaluator
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Hak Akses Switcher */}
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-[#52647a]">
+              Peran / Akses:
+              <select
+                value={userRole}
+                onChange={(e) => handleRoleChange(e.target.value as UserRole)}
+                aria-label="Pilih peran akses pengguna"
+                className="rounded border border-[#cfd9e4] bg-[#f8fafc] px-2.5 py-1 text-[12px] font-semibold text-[#243247]"
+              >
+                <option value="UPG Tingkat 2">UPG Tingkat 2</option>
+                <option value="UPG Pusat">UPG Pusat</option>
+                <option value="Satker">Satker</option>
+              </select>
+            </label>
+
+            <div className="flex items-center gap-2.5 font-bold">
+              <div className="grid h-[34px] w-[34px] place-items-center rounded-full bg-[#e7f0fc] text-[14px] font-bold text-[#1762b5]">
+                {roleBadgeInitial}
               </div>
-              <span className="block text-[11px] font-normal text-[#718096]">
-                UPG Tingkat II
-              </span>
+              <div className="leading-tight">
+                <div className="text-[13px] font-bold text-[#243247]">
+                  {userRole}
+                </div>
+                <span className="block text-[11px] font-normal text-[#718096]">
+                  {roleSubtitle}
+                </span>
+              </div>
             </div>
           </div>
         </header>
 
         {/* Content */}
         <div className="mx-auto max-w-[1600px] px-7 py-[25px] max-md:p-[15px]">
-          {/* Pagehead Banner */}
-          <div className="mb-5 flex items-center justify-between gap-2.5 rounded-[2px] bg-[#07579f] px-[18px] py-[15px] text-white shadow-[0_7px_16px_rgba(27,53,85,0.11)] max-md:flex-col max-md:items-start">
-            <div>
-              <h1 className="m-0 text-[20px] font-semibold leading-snug text-white">
-                {meta.title}
-              </h1>
-              <span className="text-[12px] text-[#dcecff]">
-                Program Kerja Pengendalian Gratifikasi
+          {/* Pagehead Banner untuk Modul PPG */}
+          {isPpgPage && (
+            <div className="no-print mb-5 flex items-center justify-between gap-2.5 rounded-[2px] bg-[#07579f] px-[18px] py-[15px] text-white shadow-[0_7px_16px_rgba(27,53,85,0.11)] max-md:flex-col max-md:items-start">
+              <div>
+                <h1 className="m-0 text-[20px] font-semibold leading-snug text-white">
+                  {meta.title}
+                </h1>
+                <span className="text-[12px] text-[#dcecff]">
+                  {meta.subtitle}
+                </span>
+              </div>
+
+              <span className="rounded bg-[#edf2f7] px-[7px] py-1 text-[10px] font-semibold text-[#52647a] whitespace-nowrap">
+                TAHUN PELAKSANAAN {year}
               </span>
             </div>
-
-            <span className="rounded bg-[#edf2f7] px-[7px] py-1 text-[10px] font-semibold text-[#52647a] whitespace-nowrap">
-              TAHUN PELAKSANAAN {year}
-            </span>
-          </div>
+          )}
 
           {/* Active Page */}
-          {activePage === 'dashboard' && (
-            <DashboardPage satState={satState} onNavigate={setActivePage} />
+          {effectivePage === 'pengawasan-reguler' && (
+            <PengawasanRegulerPage
+              items={pengawasanReguler}
+              onUpdateItem={handleUpdatePengawasan}
+              onNavigate={handleNavigate}
+            />
           )}
 
-          {activePage === 'monitoring' && (
-            <MonitoringPage
+          {effectivePage === 'audit-kinerja' && (
+            <AuditKinerjaPage
+              items={auditKinerja}
+              onUpdateItem={handleUpdateAuditKinerja}
+              onNavigate={handleNavigate}
+            />
+          )}
+
+          {effectivePage === 'ppg-risiko' && (
+            <PenilaianRisikoPage
+              year={year}
+              userRole={userRole}
+              assessments={assessments}
+              riskMatrix={riskMatrix}
+              initialSatkerUniqueId={riskEditTarget?.satkerUniqueId}
+              initialRiskCode={riskEditTarget?.riskCode}
+              onSaveAssessment={handleSaveAssessment}
+              onSaveRiskMatrix={setRiskMatrix}
+              onNavigateDashboard={() => handleNavigate('ppg-dashboard')}
+            />
+          )}
+
+          {effectivePage === 'ppg-dashboard' && (
+            <DashboardPPGPage
+              userRole={userRole}
+              assessments={assessments}
+              riskMatrix={riskMatrix}
+              onOpenRiskFormForSatker={handleOpenRiskFormForSatker}
+              onOpenNewRiskForm={handleOpenNewRiskForm}
+            />
+          )}
+
+          {effectivePage === 'ppg-monev' && (
+            <MonevPPGPage
               year={year}
               onYearChange={setYear}
-              details={details}
-              onUpdateDetail={handleUpdateDetail}
-              onExportCSV={() =>
-                downloadCSV('monitoring', { details, selfScores, satState })
-              }
-            />
-          )}
-
-          {activePage === 'mandiri' && (
-            <PenilaianMandiriPage
-              year={year}
-              onYearChange={setYear}
-              selfScores={selfScores}
-              onSaveScore={handleSaveScore}
-              onExportCSV={() =>
-                downloadCSV('evaluation', { details, selfScores, satState })
-              }
-            />
-          )}
-
-          {activePage === 'satker' && (
-            <EvaluasiSatkerPage
-              satState={satState}
-              onSaveSatker={handleSaveSatker}
-            />
-          )}
-
-          {activePage === 'rekap' && (
-            <RekapitulasiPage
-              year={year}
-              onYearChange={setYear}
-              satState={satState}
-              onExportCSV={() =>
-                downloadCSV('rekap', { details, selfScores, satState })
-              }
-            />
-          )}
-
-          {activePage === 'laporan' && (
-            <LaporanPage
-              year={year}
-              selfScores={selfScores}
-              satState={satState}
+              userRole={userRole}
+              monevRecords={monevRecords}
+              annualRecords={annualRecords}
+              onSaveMonev={handleSaveMonev}
+              onSaveAnnualRecord={handleSaveAnnualRecord}
             />
           )}
         </div>
