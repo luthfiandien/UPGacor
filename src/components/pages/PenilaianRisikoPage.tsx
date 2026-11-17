@@ -88,30 +88,40 @@ export function PenilaianRisikoPage({
   onSaveRiskMatrix,
   onNavigateDashboard,
 }: PenilaianRisikoPageProps) {
-  const isEvaluator = userRole === 'UPG Tingkat 2';
-  const allowedUpgLevels: UpgLevel[] = isEvaluator
-    ? ['UPG Tingkat 3']
-    : UPG_LEVELS;
+  const allowedUpgLevels: UpgLevel[] =
+    userRole === 'UPG Tingkat 2'
+      ? ['UPG Tingkat 3']
+      : userRole === 'UPG Tingkat 1'
+        ? ['UPG Tingkat 2', 'UPG Tingkat 3']
+        : UPG_LEVELS;
+  const isSingleLevelLocked = allowedUpgLevels.length === 1;
 
   const canEdit = true;
   const canConfigMatrix =
-    userRole === 'UPG Tingkat 2' || userRole === 'UPG Pusat';
+    userRole === 'UPG Tingkat 1' ||
+    userRole === 'UPG Tingkat 2' ||
+    userRole === 'UPG Pusat';
   const canReturnToDashboard =
-    userRole === 'UPG Tingkat 2' || userRole === 'UPG Pusat';
+    userRole === 'UPG Tingkat 1' ||
+    userRole === 'UPG Tingkat 2' ||
+    userRole === 'UPG Pusat';
 
   const initialSatker: MasterSatker | undefined = initialSatkerUniqueId
     ? MASTER_SATKER_LIST.find((s) => s.uniqueId === initialSatkerUniqueId)
     : undefined;
 
   const [selectedUpg, setSelectedUpg] = useState<UpgLevel | ''>(() => {
-    if (isEvaluator) return 'UPG Tingkat 3';
-    return initialSatker?.upgLevel ?? '';
+    if (isSingleLevelLocked) return allowedUpgLevels[0];
+    if (initialSatker && allowedUpgLevels.includes(initialSatker.upgLevel)) {
+      return initialSatker.upgLevel;
+    }
+    return '';
   });
   const [selectedSatkerId, setSelectedSatkerId] = useState<string>(() => {
-    if (isEvaluator && initialSatker && initialSatker.upgLevel !== 'UPG Tingkat 3') {
-      return '';
+    if (initialSatker && allowedUpgLevels.includes(initialSatker.upgLevel)) {
+      return initialSatker.uniqueId;
     }
-    return initialSatker?.uniqueId ?? '';
+    return '';
   });
   const [selectedRiskCode, setSelectedRiskCode] = useState<string>(
     initialRiskCode ?? ''
@@ -153,24 +163,48 @@ export function PenilaianRisikoPage({
     }
   }, [initialSatkerUniqueId, initialRiskCode, assessments]);
 
-  // Enforce UPG Tingkat 3 scope whenever active role switches to Evaluator
+  // Enforce role-based UPG scope whenever active role changes
   useEffect(() => {
-    if (isEvaluator) {
-      if (selectedUpg !== 'UPG Tingkat 3') {
-        setSelectedUpg('UPG Tingkat 3');
+    const scopeLevels: UpgLevel[] =
+      userRole === 'UPG Tingkat 2'
+        ? ['UPG Tingkat 3']
+        : userRole === 'UPG Tingkat 1'
+          ? ['UPG Tingkat 2', 'UPG Tingkat 3']
+          : UPG_LEVELS;
+
+    if (scopeLevels.length === 1) {
+      const onlyLevel = scopeLevels[0];
+      if (selectedUpg !== onlyLevel) {
+        setSelectedUpg(onlyLevel);
       }
       if (selectedSatkerId) {
         const sat = MASTER_SATKER_LIST.find(
           (s) => s.uniqueId === selectedSatkerId
         );
-        if (sat && sat.upgLevel !== 'UPG Tingkat 3') {
+        if (sat && sat.upgLevel !== onlyLevel) {
+          setSelectedSatkerId('');
+        }
+      }
+    } else {
+      if (selectedUpg && !scopeLevels.includes(selectedUpg)) {
+        setSelectedUpg('');
+        setSelectedSatkerId('');
+      } else if (selectedSatkerId) {
+        const sat = MASTER_SATKER_LIST.find(
+          (s) => s.uniqueId === selectedSatkerId
+        );
+        if (sat && !scopeLevels.includes(sat.upgLevel)) {
           setSelectedSatkerId('');
         }
       }
     }
-  }, [isEvaluator, selectedUpg, selectedSatkerId]);
+  }, [userRole, selectedUpg, selectedSatkerId]);
 
-  const effectiveUpg: UpgLevel | '' = isEvaluator ? 'UPG Tingkat 3' : selectedUpg;
+  const effectiveUpg: UpgLevel | '' = isSingleLevelLocked
+    ? allowedUpgLevels[0]
+    : selectedUpg && allowedUpgLevels.includes(selectedUpg)
+      ? selectedUpg
+      : '';
 
   const satkersForLevel = effectiveUpg
     ? MASTER_SATKER_LIST.filter((s) => s.upgLevel === effectiveUpg)
@@ -440,12 +474,14 @@ export function PenilaianRisikoPage({
               1. Tingkat UPG <span className="text-[#dc3545]">*</span>
             </label>
             <select
-              disabled={!canEdit || isEvaluator}
+              disabled={!canEdit || isSingleLevelLocked}
               value={effectiveUpg}
               onChange={(e) => handleUpgChange(e.target.value as UpgLevel | '')}
               className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247] disabled:bg-[#f4f7fa] disabled:font-semibold"
             >
-              {!isEvaluator && <option value="">-- Pilih Tingkat UPG --</option>}
+              {!isSingleLevelLocked && (
+                <option value="">-- Pilih Tingkat UPG --</option>
+              )}
               {allowedUpgLevels.map((lvl) => (
                 <option key={lvl} value={lvl}>
                   {lvl}

@@ -65,18 +65,26 @@ export function MonevPPGPage({
   onSaveMonev,
   onSaveAnnualRecord,
 }: MonevPPGPageProps) {
-  const canAccess = userRole === 'UPG Tingkat 2' || userRole === 'UPG Pusat';
+  const canAccess =
+    userRole === 'UPG Tingkat 1' ||
+    userRole === 'UPG Tingkat 2' ||
+    userRole === 'UPG Pusat';
   const canEdit = canAccess;
-  const isEvaluator = userRole === 'UPG Tingkat 2';
-  const allowedUpgLevels: UpgLevel[] = isEvaluator
-    ? ['UPG Tingkat 3']
-    : UPG_LEVELS;
+  const allowedUpgLevels: UpgLevel[] =
+    userRole === 'UPG Tingkat 2'
+      ? ['UPG Tingkat 3']
+      : userRole === 'UPG Tingkat 1'
+        ? ['UPG Tingkat 2', 'UPG Tingkat 3']
+        : UPG_LEVELS;
+  const isSingleLevelLocked = allowedUpgLevels.length === 1;
 
   const [activeTab, setActiveTab] = useState<MonevViewTab>('tahunan');
   const [selectedUpg, setSelectedUpg] = useState<UpgLevel>(() =>
-    isEvaluator ? 'UPG Tingkat 3' : 'UPG Tingkat 2'
+    userRole === 'UPG Tingkat 2' ? 'UPG Tingkat 3' : 'UPG Tingkat 2'
   );
-  const effectiveUpg: UpgLevel = isEvaluator ? 'UPG Tingkat 3' : selectedUpg;
+  const effectiveUpg: UpgLevel = allowedUpgLevels.includes(selectedUpg)
+    ? selectedUpg
+    : allowedUpgLevels[0];
   const satkersForLevel = MASTER_SATKER_LIST.filter(
     (s) => s.upgLevel === effectiveUpg
   );
@@ -85,17 +93,23 @@ export function MonevPPGPage({
   );
 
   useEffect(() => {
-    if (isEvaluator && selectedUpg !== 'UPG Tingkat 3') {
-      setSelectedUpg('UPG Tingkat 3');
-      const list = MASTER_SATKER_LIST.filter(
-        (s) => s.upgLevel === 'UPG Tingkat 3'
-      );
+    const scopeLevels: UpgLevel[] =
+      userRole === 'UPG Tingkat 2'
+        ? ['UPG Tingkat 3']
+        : userRole === 'UPG Tingkat 1'
+          ? ['UPG Tingkat 2', 'UPG Tingkat 3']
+          : UPG_LEVELS;
+
+    if (!scopeLevels.includes(selectedUpg)) {
+      const nextUpg = scopeLevels[0];
+      setSelectedUpg(nextUpg);
+      const list = MASTER_SATKER_LIST.filter((s) => s.upgLevel === nextUpg);
       if (list.length > 0) {
         setSelectedSatkerId(list[0].uniqueId);
       }
       setIsEditing(false);
     }
-  }, [isEvaluator, selectedUpg]);
+  }, [userRole, selectedUpg]);
 
   const selectedSatker =
     satkersForLevel.find((s) => s.uniqueId === selectedSatkerId) ??
@@ -338,8 +352,9 @@ export function MonevPPGPage({
       <div className="rounded-[7px] border border-[#f5c2c7] bg-[#fde8e8] p-6 text-center text-[#9b1c24]">
         <h2 className="m-0 text-[16px] font-bold">Akses Dibatasi</h2>
         <p className="mt-1.5 mb-0 text-[13px]">
-          Halaman <b>Monev PPG</b> hanya dapat dilihat oleh <b>UPG Tingkat 2</b>{' '}
-          atau <b>UPG Pusat</b>. Satker tidak memiliki akses ke halaman ini.
+          Halaman <b>Monev PPG</b> hanya dapat dilihat oleh <b>UPG Tingkat 1</b>,{' '}
+          <b>UPG Tingkat 2</b>, atau <b>UPG Pusat</b>. Satker tidak memiliki
+          akses ke halaman ini.
         </p>
       </div>
     );
@@ -483,7 +498,7 @@ export function MonevPPGPage({
                 <span className="text-[#243247]">Tingkat UPG</span>
                 <select
                   value={effectiveUpg}
-                  disabled={isEvaluator}
+                  disabled={isSingleLevelLocked}
                   onChange={(e) => handleUpgChange(e.target.value as UpgLevel)}
                   className="w-full max-w-[260px] border-0 bg-[#e4f0fa] px-2.5 py-1 text-[12.5px] font-medium text-[#243247] focus:outline-none disabled:font-semibold"
                 >
@@ -819,7 +834,7 @@ export function MonevPPGPage({
                 </span>
                 <select
                   value={effectiveUpg}
-                  disabled={isEvaluator}
+                  disabled={isSingleLevelLocked}
                   onChange={(e) => handleUpgChange(e.target.value as UpgLevel)}
                   className="rounded bg-[#e4f0fa] px-2.5 py-1 font-bold text-[#1762b5]"
                 >

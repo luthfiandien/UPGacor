@@ -20,7 +20,9 @@ interface SidebarProps {
 export function Sidebar({ activePage, userRole, onNavigate }: SidebarProps) {
   const [ppgOpen, setPpgOpen] = useState(true);
   const canAccessEvaluatorViews =
-    userRole === 'UPG Tingkat 2' || userRole === 'UPG Pusat';
+    userRole === 'UPG Tingkat 1' ||
+    userRole === 'UPG Tingkat 2' ||
+    userRole === 'UPG Pusat';
 
   const isPpgActive =
     activePage === 'ppg-risiko' ||

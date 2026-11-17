@@ -5,7 +5,11 @@ export type PageId =
   | 'ppg-dashboard'
   | 'ppg-monev';
 
-export type UserRole = 'UPG Tingkat 2' | 'UPG Pusat' | 'Satker';
+export type UserRole =
+  | 'UPG Tingkat 1'
+  | 'UPG Tingkat 2'
+  | 'UPG Pusat'
+  | 'Satker';
 
 export type UpgLevel = 'UPG Tingkat 1' | 'UPG Tingkat 2' | 'UPG Tingkat 3';
 

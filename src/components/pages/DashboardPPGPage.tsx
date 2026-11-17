@@ -23,6 +23,7 @@ import {
   MasterSatker,
   RiskAssessmentRecord,
   RiskMatrixConfig,
+  UpgLevel,
   UserRole,
 } from '../../types/upg';
 import { Modal } from '../Modal';
@@ -43,7 +44,10 @@ export function DashboardPPGPage({
   onOpenRiskFormForSatker,
   onOpenNewRiskForm,
 }: DashboardPPGPageProps) {
-  const canAccess = userRole === 'UPG Tingkat 2' || userRole === 'UPG Pusat';
+  const canAccess =
+    userRole === 'UPG Tingkat 1' ||
+    userRole === 'UPG Tingkat 2' ||
+    userRole === 'UPG Pusat';
   const canEdit = canAccess;
 
   const [upgFilter, setUpgFilter] = useState<string>('ALL');
@@ -57,25 +61,28 @@ export function DashboardPPGPage({
         <h2 className="m-0 text-[16px] font-bold">Akses Dibatasi</h2>
         <p className="mt-1.5 mb-0 text-[13px]">
           Halaman <b>Dashboard PPG</b> hanya dapat dilihat oleh{' '}
-          <b>UPG Tingkat 2</b> atau <b>UPG Pusat</b>. Satker tidak memiliki akses
-          ke halaman ini.
+          <b>UPG Tingkat 1</b>, <b>UPG Tingkat 2</b>, atau <b>UPG Pusat</b>.
+          Satker tidak memiliki akses ke halaman ini.
         </p>
       </div>
     );
   }
 
-  const isEvaluator = userRole === 'UPG Tingkat 2';
-  const availableLevels = isEvaluator
-    ? (['UPG Tingkat 3'] as const)
-    : UPG_LEVELS;
+  const availableLevels: readonly UpgLevel[] =
+    userRole === 'UPG Tingkat 2'
+      ? ['UPG Tingkat 3']
+      : userRole === 'UPG Tingkat 1'
+        ? ['UPG Tingkat 2', 'UPG Tingkat 3']
+        : UPG_LEVELS;
+  const isSingleLevelLocked = availableLevels.length === 1;
 
-  const scopedSatkers = isEvaluator
-    ? MASTER_SATKER_LIST.filter((s) => s.upgLevel === 'UPG Tingkat 3')
-    : MASTER_SATKER_LIST;
+  const scopedSatkers = MASTER_SATKER_LIST.filter((s) =>
+    availableLevels.includes(s.upgLevel)
+  );
 
-  const scopedAssessments = isEvaluator
-    ? assessments.filter((a) => a.upgLevel === 'UPG Tingkat 3')
-    : assessments;
+  const scopedAssessments = assessments.filter((a) =>
+    availableLevels.includes(a.upgLevel)
+  );
 
   // Derive per-satker actual risk assessment statistics
   const satkerRows = scopedSatkers.map((satker) => {
@@ -126,7 +133,11 @@ export function DashboardPPGPage({
   });
 
   // Apply table filters
-  const effectiveUpgFilter = isEvaluator ? 'UPG Tingkat 3' : upgFilter;
+  const effectiveUpgFilter = isSingleLevelLocked
+    ? availableLevels[0]
+    : upgFilter !== 'ALL' && !availableLevels.includes(upgFilter as UpgLevel)
+      ? 'ALL'
+      : upgFilter;
   const q = satkerSearch.trim().toLowerCase();
   const filteredRows = satkerRows.filter((row) => {
     if (
@@ -144,7 +155,7 @@ export function DashboardPPGPage({
   });
 
   const visibleDetailSatker =
-    detailSatker && (!isEvaluator || detailSatker.upgLevel === 'UPG Tingkat 3')
+    detailSatker && availableLevels.includes(detailSatker.upgLevel)
       ? detailSatker
       : null;
 
@@ -160,14 +171,18 @@ export function DashboardPPGPage({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[#e9eef4] pb-3">
           <div>
             <h2 className="m-0 text-[16px] font-bold text-[#1d3554]">
-              {isEvaluator
-                ? 'Monitoring Pelaksanaan Penilaian Risiko Gratifikasi Satker (UPG Tingkat 3)'
-                : 'Monitoring Pelaksanaan Penilaian Risiko Gratifikasi Seluruh Satker'}
+              {userRole === 'UPG Tingkat 1'
+                ? 'Monitoring Pelaksanaan Penilaian Risiko Gratifikasi Satker (UPG Tingkat 2 & 3)'
+                : userRole === 'UPG Tingkat 2'
+                  ? 'Monitoring Pelaksanaan Penilaian Risiko Gratifikasi Satker (UPG Tingkat 3)'
+                  : 'Monitoring Pelaksanaan Penilaian Risiko Gratifikasi Seluruh Satker'}
             </h2>
             <p className="m-0 mt-0.5 text-[12px] text-[#718096]">
-              {isEvaluator
-                ? 'Lingkup UPG Tingkat 2: hanya menampilkan satker UPG Tingkat 3 yang dievaluasi.'
-                : 'Ringkasan dan status aktual berdasarkan data yang disimpan dari formulir Penilaian Risiko Gratifikasi.'}
+              {userRole === 'UPG Tingkat 1'
+                ? 'Lingkup UPG Tingkat 1: menampilkan satker UPG Tingkat 2 dan UPG Tingkat 3 yang dievaluasi.'
+                : userRole === 'UPG Tingkat 2'
+                  ? 'Lingkup UPG Tingkat 2: hanya menampilkan satker UPG Tingkat 3 yang dievaluasi.'
+                  : 'Ringkasan dan status aktual berdasarkan data yang disimpan dari formulir Penilaian Risiko Gratifikasi.'}
             </p>
           </div>
           {canEdit && (
@@ -194,7 +209,11 @@ export function DashboardPPGPage({
                   {totalSatker}
                 </div>
                 <div className="text-[11px] text-[#718096]">
-                  {isEvaluator ? 'Khusus UPG Tingkat 3' : 'UPG Tingkat 1, 2, dan 3'}
+                  {userRole === 'UPG Tingkat 1'
+                    ? 'UPG Tingkat 2 dan 3'
+                    : userRole === 'UPG Tingkat 2'
+                      ? 'Khusus UPG Tingkat 3'
+                      : 'UPG Tingkat 1, 2, dan 3'}
                 </div>
               </div>
               <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#eaf2fc] text-[#1762b5]">
@@ -318,11 +337,13 @@ export function DashboardPPGPage({
             Tingkat UPG
             <select
               value={effectiveUpgFilter}
-              disabled={isEvaluator}
+              disabled={isSingleLevelLocked}
               onChange={(e) => setUpgFilter(e.target.value)}
               className="rounded border border-[#cfd9e4] bg-white px-2.5 py-1.5 text-[13px] font-normal text-[#243247] disabled:bg-[#eef2f6] disabled:font-semibold"
             >
-              {!isEvaluator && <option value="ALL">Semua Tingkat UPG</option>}
+              {!isSingleLevelLocked && (
+                <option value="ALL">Semua Tingkat UPG</option>
+              )}
               {availableLevels.map((lvl) => (
                 <option key={lvl} value={lvl}>
                   {lvl}

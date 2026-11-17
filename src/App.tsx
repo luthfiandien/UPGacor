@@ -41,6 +41,8 @@ interface PersistedState {
 }
 
 function normalizeUserRole(raw: unknown): UserRole {
+  if (raw === 'UPG Tingkat 1' || raw === 'UPG Tingkat I')
+    return 'UPG Tingkat 1';
   if (raw === 'UPG Pusat' || raw === 'PPG Pusat') return 'UPG Pusat';
   if (raw === 'Satker' || raw === 'Pemantau (Read-Only)') return 'Satker';
   return 'UPG Tingkat 2';
@@ -181,7 +183,9 @@ export default function App() {
   };
 
   const canViewEvaluatorPages =
-    userRole === 'UPG Tingkat 2' || userRole === 'UPG Pusat';
+    userRole === 'UPG Tingkat 1' ||
+    userRole === 'UPG Tingkat 2' ||
+    userRole === 'UPG Pusat';
 
   const handleRoleChange = (nextRole: UserRole) => {
     setUserRole(nextRole);
@@ -233,13 +237,21 @@ export default function App() {
     effectivePage === 'ppg-monev';
 
   const roleBadgeInitial =
-    userRole === 'UPG Tingkat 2' ? 'T2' : userRole === 'UPG Pusat' ? 'U' : 'S';
+    userRole === 'UPG Tingkat 1'
+      ? 'T1'
+      : userRole === 'UPG Tingkat 2'
+        ? 'T2'
+        : userRole === 'UPG Pusat'
+          ? 'U'
+          : 'S';
   const roleSubtitle =
-    userRole === 'UPG Tingkat 2'
-      ? 'Evaluator UPG Tingkat 3'
-      : userRole === 'UPG Pusat'
-        ? 'Monitoring & Monev UPG Pusat'
-        : 'Input Penilaian Risiko Satker';
+    userRole === 'UPG Tingkat 1'
+      ? 'Evaluator UPG Tingkat 2 & 3'
+      : userRole === 'UPG Tingkat 2'
+        ? 'Evaluator UPG Tingkat 3'
+        : userRole === 'UPG Pusat'
+          ? 'Monitoring & Monev UPG Pusat'
+          : 'Input Penilaian Risiko Satker';
 
   return (
     <div className="flex min-h-screen max-md:block">
@@ -266,6 +278,7 @@ export default function App() {
                 aria-label="Pilih peran akses pengguna"
                 className="rounded border border-[#cfd9e4] bg-[#f8fafc] px-2.5 py-1 text-[12px] font-semibold text-[#243247]"
               >
+                <option value="UPG Tingkat 1">UPG Tingkat 1</option>
                 <option value="UPG Tingkat 2">UPG Tingkat 2</option>
                 <option value="UPG Pusat">UPG Pusat</option>
                 <option value="Satker">Satker</option>
