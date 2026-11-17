@@ -14,9 +14,7 @@ import {
   createDefaultRiskMatrix,
   INITIAL_AUDIT_KINERJA,
   INITIAL_PENGAWASAN_REGULER,
-  MASTER_SATKER_LIST,
   PAGE_META,
-  UPG_LEVELS,
 } from './data/ppgData';
 import {
   AnnualEvalSatkerRecord,
@@ -31,14 +29,9 @@ import {
 
 const STORAGE_KEY = 'wastitama_ppg_integrated_state_v2';
 
-const DEFAULT_SATKER_ID =
-  MASTER_SATKER_LIST.find((s) => s.upgLevel === 'UPG Tingkat 3')?.uniqueId ??
-  MASTER_SATKER_LIST[0].uniqueId;
-
 interface PersistedState {
   year: string;
   userRole: UserRole;
-  activeSatkerUniqueId: string;
   assessments: RiskAssessmentRecord[];
   riskMatrix: RiskMatrixConfig;
   monevRecords: Record<string, MonevSatkerRecord>;
@@ -53,21 +46,10 @@ function normalizeUserRole(raw: unknown): UserRole {
   return 'UPG Tingkat 2';
 }
 
-function normalizeSatkerId(raw: unknown): string {
-  if (
-    typeof raw === 'string' &&
-    MASTER_SATKER_LIST.some((s) => s.uniqueId === raw)
-  ) {
-    return raw;
-  }
-  return DEFAULT_SATKER_ID;
-}
-
 function loadInitialState(): PersistedState {
   const fallback: PersistedState = {
     year: '2026',
     userRole: 'UPG Tingkat 2',
-    activeSatkerUniqueId: DEFAULT_SATKER_ID,
     assessments: [],
     riskMatrix: createDefaultRiskMatrix(),
     monevRecords: {},
@@ -83,7 +65,6 @@ function loadInitialState(): PersistedState {
     return {
       year: parsed.year || '2026',
       userRole: normalizeUserRole(parsed.userRole),
-      activeSatkerUniqueId: normalizeSatkerId(parsed.activeSatkerUniqueId),
       assessments: Array.isArray(parsed.assessments) ? parsed.assessments : [],
       riskMatrix: parsed.riskMatrix?.grid
         ? parsed.riskMatrix
@@ -105,10 +86,9 @@ function loadInitialState(): PersistedState {
 export default function App() {
   const [initial] = useState<PersistedState>(() => loadInitialState());
   const [userRole, setUserRole] = useState<UserRole>(initial.userRole);
-  const [activeSatkerUniqueId, setActiveSatkerUniqueId] = useState<string>(
-    initial.activeSatkerUniqueId
+  const [activePage, setActivePage] = useState<PageId>(() =>
+    initial.userRole === 'Satker' ? 'ppg-risiko' : 'ppg-dashboard'
   );
-  const [activePage, setActivePage] = useState<PageId>('ppg-dashboard');
   const [year, setYear] = useState<string>(initial.year);
   const [assessments, setAssessments] = useState<RiskAssessmentRecord[]>(
     initial.assessments
@@ -140,7 +120,6 @@ export default function App() {
       const payload: PersistedState = {
         year,
         userRole,
-        activeSatkerUniqueId,
         assessments,
         riskMatrix,
         monevRecords,
@@ -155,7 +134,6 @@ export default function App() {
   }, [
     year,
     userRole,
-    activeSatkerUniqueId,
     assessments,
     riskMatrix,
     monevRecords,
@@ -202,28 +180,25 @@ export default function App() {
     );
   };
 
-  const canViewMonev =
+  const canViewEvaluatorPages =
     userRole === 'UPG Tingkat 2' || userRole === 'UPG Pusat';
-
-  const activeSatkerObj =
-    MASTER_SATKER_LIST.find((s) => s.uniqueId === activeSatkerUniqueId) ??
-    MASTER_SATKER_LIST[0];
 
   const handleRoleChange = (nextRole: UserRole) => {
     setUserRole(nextRole);
-    if (nextRole === 'Satker' && activePage === 'ppg-monev') {
-      setActivePage('ppg-dashboard');
+    if (
+      nextRole === 'Satker' &&
+      (activePage === 'ppg-dashboard' || activePage === 'ppg-monev')
+    ) {
+      setActivePage('ppg-risiko');
     }
   };
 
-  const handleActiveSatkerChange = (nextSatkerId: string) => {
-    setActiveSatkerUniqueId(nextSatkerId);
-    setRiskEditTarget(null);
-  };
-
   const handleNavigate = (page: PageId) => {
-    if (!canViewMonev && page === 'ppg-monev') {
-      setActivePage('ppg-dashboard');
+    if (
+      !canViewEvaluatorPages &&
+      (page === 'ppg-dashboard' || page === 'ppg-monev')
+    ) {
+      setActivePage('ppg-risiko');
       return;
     }
     if (page !== 'ppg-risiko') {
@@ -236,9 +211,7 @@ export default function App() {
     satkerUniqueId: string,
     riskCode?: string
   ) => {
-    const targetSatkerId =
-      userRole === 'Satker' ? activeSatkerUniqueId : satkerUniqueId;
-    setRiskEditTarget({ satkerUniqueId: targetSatkerId, riskCode });
+    setRiskEditTarget({ satkerUniqueId, riskCode });
     setActivePage('ppg-risiko');
   };
 
@@ -248,8 +221,9 @@ export default function App() {
   };
 
   const effectivePage: PageId =
-    !canViewMonev && activePage === 'ppg-monev'
-      ? 'ppg-dashboard'
+    !canViewEvaluatorPages &&
+    (activePage === 'ppg-dashboard' || activePage === 'ppg-monev')
+      ? 'ppg-risiko'
       : activePage;
 
   const meta = PAGE_META[effectivePage];
@@ -265,7 +239,7 @@ export default function App() {
       ? 'Evaluator UPG Tingkat 3'
       : userRole === 'UPG Pusat'
         ? 'Monitoring & Monev UPG Pusat'
-        : activeSatkerObj.namaSatker;
+        : 'Input Penilaian Risiko Satker';
 
   return (
     <div className="flex min-h-screen max-md:block">
@@ -297,30 +271,6 @@ export default function App() {
                 <option value="Satker">Satker</option>
               </select>
             </label>
-
-            {userRole === 'Satker' && (
-              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-[#52647a]">
-                Satker Aktif:
-                <select
-                  value={activeSatkerUniqueId}
-                  onChange={(e) => handleActiveSatkerChange(e.target.value)}
-                  aria-label="Pilih satuan kerja aktif"
-                  className="max-w-[260px] rounded border border-[#cfd9e4] bg-[#f8fafc] px-2.5 py-1 text-[12px] font-semibold text-[#243247]"
-                >
-                  {UPG_LEVELS.map((lvl) => (
-                    <optgroup key={lvl} label={lvl}>
-                      {MASTER_SATKER_LIST.filter(
-                        (s) => s.upgLevel === lvl
-                      ).map((sat) => (
-                        <option key={sat.uniqueId} value={sat.uniqueId}>
-                          {sat.namaSatker}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </label>
-            )}
 
             <div className="flex items-center gap-2.5 font-bold">
               <div className="grid h-[34px] w-[34px] place-items-center rounded-full bg-[#e7f0fc] text-[14px] font-bold text-[#1762b5]">
@@ -381,9 +331,6 @@ export default function App() {
               userRole={userRole}
               assessments={assessments}
               riskMatrix={riskMatrix}
-              lockedSatkerUniqueId={
-                userRole === 'Satker' ? activeSatkerUniqueId : undefined
-              }
               initialSatkerUniqueId={riskEditTarget?.satkerUniqueId}
               initialRiskCode={riskEditTarget?.riskCode}
               onSaveAssessment={handleSaveAssessment}
@@ -395,9 +342,6 @@ export default function App() {
           {effectivePage === 'ppg-dashboard' && (
             <DashboardPPGPage
               userRole={userRole}
-              activeSatkerUniqueId={
-                userRole === 'Satker' ? activeSatkerUniqueId : undefined
-              }
               assessments={assessments}
               riskMatrix={riskMatrix}
               onOpenRiskFormForSatker={handleOpenRiskFormForSatker}

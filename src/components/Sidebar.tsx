@@ -124,24 +124,26 @@ export function Sidebar({ activePage, userRole, onNavigate }: SidebarProps) {
                 <span>Penilaian Risiko Gratifikasi</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => onNavigate('ppg-dashboard')}
-                className={subBtnClass(activePage === 'ppg-dashboard')}
-              >
-                <LayoutDashboard className="h-3.5 w-3.5 shrink-0 opacity-90" />
-                <span>Dashboard PPG</span>
-              </button>
-
               {canAccessEvaluatorViews && (
-                <button
-                  type="button"
-                  onClick={() => onNavigate('ppg-monev')}
-                  className={subBtnClass(activePage === 'ppg-monev')}
-                >
-                  <ListChecks className="h-3.5 w-3.5 shrink-0 opacity-90" />
-                  <span>Monev PPG</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('ppg-dashboard')}
+                    className={subBtnClass(activePage === 'ppg-dashboard')}
+                  >
+                    <LayoutDashboard className="h-3.5 w-3.5 shrink-0 opacity-90" />
+                    <span>Dashboard PPG</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('ppg-monev')}
+                    className={subBtnClass(activePage === 'ppg-monev')}
+                  >
+                    <ListChecks className="h-3.5 w-3.5 shrink-0 opacity-90" />
+                    <span>Monev PPG</span>
+                  </button>
+                </>
               )}
             </div>
           )}
