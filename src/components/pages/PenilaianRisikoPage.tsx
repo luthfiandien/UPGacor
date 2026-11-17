@@ -38,6 +38,7 @@ interface PenilaianRisikoPageProps {
   userRole: UserRole;
   assessments: RiskAssessmentRecord[];
   riskMatrix: RiskMatrixConfig;
+  lockedSatkerUniqueId?: string;
   initialSatkerUniqueId?: string | null;
   initialRiskCode?: string | null;
   onSaveAssessment: (record: RiskAssessmentRecord) => void;
@@ -82,12 +83,14 @@ export function PenilaianRisikoPage({
   userRole,
   assessments,
   riskMatrix,
+  lockedSatkerUniqueId,
   initialSatkerUniqueId,
   initialRiskCode,
   onSaveAssessment,
   onSaveRiskMatrix,
   onNavigateDashboard,
 }: PenilaianRisikoPageProps) {
+  const isSatkerRole = userRole === 'Satker';
   const isEvaluator = userRole === 'UPG Tingkat 2';
   const allowedUpgLevels: UpgLevel[] = isEvaluator
     ? ['UPG Tingkat 3']
@@ -96,18 +99,26 @@ export function PenilaianRisikoPage({
   const canEdit = true;
   const canConfigMatrix =
     userRole === 'UPG Tingkat 2' || userRole === 'UPG Pusat';
-  const canReturnToDashboard =
-    userRole === 'UPG Tingkat 2' || userRole === 'UPG Pusat';
+  const canReturnToDashboard = true;
 
-  const initialSatker: MasterSatker | undefined = initialSatkerUniqueId
-    ? MASTER_SATKER_LIST.find((s) => s.uniqueId === initialSatkerUniqueId)
-    : undefined;
+  const lockedSatker: MasterSatker | undefined =
+    isSatkerRole && lockedSatkerUniqueId
+      ? MASTER_SATKER_LIST.find((s) => s.uniqueId === lockedSatkerUniqueId)
+      : undefined;
+
+  const initialSatker: MasterSatker | undefined = lockedSatker
+    ? lockedSatker
+    : initialSatkerUniqueId
+      ? MASTER_SATKER_LIST.find((s) => s.uniqueId === initialSatkerUniqueId)
+      : undefined;
 
   const [selectedUpg, setSelectedUpg] = useState<UpgLevel | ''>(() => {
+    if (lockedSatker) return lockedSatker.upgLevel;
     if (isEvaluator) return 'UPG Tingkat 3';
     return initialSatker?.upgLevel ?? '';
   });
   const [selectedSatkerId, setSelectedSatkerId] = useState<string>(() => {
+    if (lockedSatker) return lockedSatker.uniqueId;
     if (isEvaluator && initialSatker && initialSatker.upgLevel !== 'UPG Tingkat 3') {
       return '';
     }
@@ -132,8 +143,17 @@ export function PenilaianRisikoPage({
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [matrixModalOpen, setMatrixModalOpen] = useState(false);
 
-  // Sync if launched from Dashboard PPG Edit button
+  // Sync if launched from Dashboard PPG Edit button or locked Satker changes
   useEffect(() => {
+    if (lockedSatker) {
+      setSelectedUpg(lockedSatker.upgLevel);
+      setSelectedSatkerId(lockedSatker.uniqueId);
+      if (initialRiskCode) {
+        setSelectedRiskCode(initialRiskCode);
+      }
+      return;
+    }
+
     if (initialSatkerUniqueId) {
       const sat = MASTER_SATKER_LIST.find(
         (s) => s.uniqueId === initialSatkerUniqueId
@@ -151,10 +171,11 @@ export function PenilaianRisikoPage({
         }
       }
     }
-  }, [initialSatkerUniqueId, initialRiskCode, assessments]);
+  }, [lockedSatker, initialSatkerUniqueId, initialRiskCode, assessments]);
 
   // Enforce UPG Tingkat 3 scope whenever active role switches to Evaluator
   useEffect(() => {
+    if (lockedSatker) return;
     if (isEvaluator) {
       if (selectedUpg !== 'UPG Tingkat 3') {
         setSelectedUpg('UPG Tingkat 3');
@@ -168,9 +189,13 @@ export function PenilaianRisikoPage({
         }
       }
     }
-  }, [isEvaluator, selectedUpg, selectedSatkerId]);
+  }, [lockedSatker, isEvaluator, selectedUpg, selectedSatkerId]);
 
-  const effectiveUpg: UpgLevel | '' = isEvaluator ? 'UPG Tingkat 3' : selectedUpg;
+  const effectiveUpg: UpgLevel | '' = lockedSatker
+    ? lockedSatker.upgLevel
+    : isEvaluator
+      ? 'UPG Tingkat 3'
+      : selectedUpg;
 
   const satkersForLevel = effectiveUpg
     ? MASTER_SATKER_LIST.filter((s) => s.upgLevel === effectiveUpg)
@@ -440,12 +465,14 @@ export function PenilaianRisikoPage({
               1. Tingkat UPG <span className="text-[#dc3545]">*</span>
             </label>
             <select
-              disabled={!canEdit || isEvaluator}
+              disabled={!canEdit || isEvaluator || Boolean(lockedSatker)}
               value={effectiveUpg}
               onChange={(e) => handleUpgChange(e.target.value as UpgLevel | '')}
               className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247] disabled:bg-[#f4f7fa] disabled:font-semibold"
             >
-              {!isEvaluator && <option value="">-- Pilih Tingkat UPG --</option>}
+              {!isEvaluator && !lockedSatker && (
+                <option value="">-- Pilih Tingkat UPG --</option>
+              )}
               {allowedUpgLevels.map((lvl) => (
                 <option key={lvl} value={lvl}>
                   {lvl}
@@ -459,10 +486,10 @@ export function PenilaianRisikoPage({
               2. Nama Satker <span className="text-[#dc3545]">*</span>
             </label>
             <select
-              disabled={!canEdit || !effectiveUpg}
-              value={selectedSatkerId}
+              disabled={!canEdit || !effectiveUpg || Boolean(lockedSatker)}
+              value={lockedSatker ? lockedSatker.uniqueId : selectedSatkerId}
               onChange={(e) => handleSatkerChange(e.target.value)}
-              className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247] disabled:bg-[#f4f7fa] disabled:text-[#8492a3]"
+              className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247] disabled:bg-[#f4f7fa] disabled:font-semibold disabled:text-[#243247]"
             >
               <option value="">
                 {effectiveUpg
