@@ -13,16 +13,21 @@ import { PenilaianRisikoPage } from './components/pages/PenilaianRisikoPage';
 import {
   createDefaultRiskMatrix,
   INITIAL_AUDIT_KINERJA,
+  INITIAL_BADAN_PENGAWASAN_ASSESSMENTS,
   INITIAL_PENGAWASAN_REGULER,
+  normalizeRiskCategory,
   PAGE_META,
+  RISK_CONTROL_LIBRARY,
 } from './data/ppgData';
 import {
   AnnualEvalSatkerRecord,
   AuditKinerjaItem,
+  ControlAssessmentEntry,
   MonevSatkerRecord,
   PageId,
   PengawasanRegulerItem,
   RiskAssessmentRecord,
+  RiskLibraryItem,
   RiskMatrixConfig,
   UserRole,
 } from './types/upg';
@@ -33,6 +38,7 @@ interface PersistedState {
   year: string;
   userRole: UserRole;
   assessments: RiskAssessmentRecord[];
+  riskCatalog: RiskLibraryItem[];
   riskMatrix: RiskMatrixConfig;
   monevRecords: Record<string, MonevSatkerRecord>;
   annualRecords: Record<string, AnnualEvalSatkerRecord>;
@@ -48,11 +54,48 @@ function normalizeUserRole(raw: unknown): UserRole {
   return 'UPG Tingkat 2';
 }
 
+function normalizePersistedAssessment(
+  rec: RiskAssessmentRecord
+): RiskAssessmentRecord {
+  const normalizeCode = (code: string) => {
+    if (code === 'PPG.RK.1') return 'PPG.RK.01';
+    if (code === 'PPG.RK.2') return 'PPG.RK.02';
+    return code;
+  };
+  const nextCode = normalizeCode(rec.kodeRisiko);
+  const nextId = rec.id.includes('::PPG.RK.1')
+    ? rec.id.replace('::PPG.RK.1', '::PPG.RK.01')
+    : rec.id.includes('::PPG.RK.2')
+      ? rec.id.replace('::PPG.RK.2', '::PPG.RK.02')
+      : rec.id;
+
+  return {
+    ...rec,
+    id: nextId,
+    kodeRisiko: nextCode,
+    controls: (rec.controls ?? []).map((c) => ({
+      ...c,
+      klaimEfektivitas:
+        (c.klaimEfektivitas as string) === 'Sebagian Efektif'
+          ? 'Efektif Sebagian'
+          : c.klaimEfektivitas,
+    })),
+    nonMandatoryControls: (rec.nonMandatoryControls ?? []).map((c) => ({
+      ...c,
+      klaimEfektivitas:
+        (c.klaimEfektivitas as string) === 'Sebagian Efektif'
+          ? 'Efektif Sebagian'
+          : c.klaimEfektivitas,
+    })),
+  };
+}
+
 function loadInitialState(): PersistedState {
   const fallback: PersistedState = {
     year: '2026',
-    userRole: 'UPG Tingkat 2',
-    assessments: [],
+    userRole: 'UPG Pusat',
+    assessments: INITIAL_BADAN_PENGAWASAN_ASSESSMENTS,
+    riskCatalog: RISK_CONTROL_LIBRARY,
     riskMatrix: createDefaultRiskMatrix(),
     monevRecords: {},
     annualRecords: {},
@@ -64,12 +107,25 @@ function loadInitialState(): PersistedState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw) as Partial<PersistedState>;
+    const normalizedGrid: Record<string, ReturnType<typeof normalizeRiskCategory>> = {};
+    if (parsed.riskMatrix?.grid) {
+      Object.entries(parsed.riskMatrix.grid).forEach(([k, val]) => {
+        normalizedGrid[k] = normalizeRiskCategory(val);
+      });
+    }
+
     return {
       year: parsed.year || '2026',
       userRole: normalizeUserRole(parsed.userRole),
-      assessments: Array.isArray(parsed.assessments) ? parsed.assessments : [],
+      assessments: Array.isArray(parsed.assessments)
+        ? parsed.assessments.map(normalizePersistedAssessment)
+        : fallback.assessments,
+      riskCatalog:
+        Array.isArray(parsed.riskCatalog) && parsed.riskCatalog.length > 0
+          ? parsed.riskCatalog
+          : fallback.riskCatalog,
       riskMatrix: parsed.riskMatrix?.grid
-        ? parsed.riskMatrix
+        ? { ...parsed.riskMatrix, grid: normalizedGrid }
         : fallback.riskMatrix,
       monevRecords: parsed.monevRecords ?? {},
       annualRecords: parsed.annualRecords ?? {},
@@ -89,11 +145,16 @@ export default function App() {
   const [initial] = useState<PersistedState>(() => loadInitialState());
   const [userRole, setUserRole] = useState<UserRole>(initial.userRole);
   const [activePage, setActivePage] = useState<PageId>(() =>
-    initial.userRole === 'Satker' ? 'ppg-risiko' : 'ppg-dashboard'
+    initial.userRole === 'Satker' || initial.userRole === 'UPG Pusat'
+      ? 'ppg-risiko'
+      : 'ppg-dashboard'
   );
   const [year, setYear] = useState<string>(initial.year);
   const [assessments, setAssessments] = useState<RiskAssessmentRecord[]>(
     initial.assessments
+  );
+  const [riskCatalog, setRiskCatalog] = useState<RiskLibraryItem[]>(
+    initial.riskCatalog
   );
   const [riskMatrix, setRiskMatrix] = useState<RiskMatrixConfig>(
     initial.riskMatrix
@@ -123,6 +184,7 @@ export default function App() {
         year,
         userRole,
         assessments,
+        riskCatalog,
         riskMatrix,
         monevRecords,
         annualRecords,
@@ -137,6 +199,7 @@ export default function App() {
     year,
     userRole,
     assessments,
+    riskCatalog,
     riskMatrix,
     monevRecords,
     annualRecords,
@@ -154,6 +217,81 @@ export default function App() {
       }
       return [...prev, record];
     });
+  };
+
+  const handleDeleteAssessment = (id: string) => {
+    setAssessments((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const handleSaveCatalogRisk = (item: RiskLibraryItem, isNew: boolean) => {
+    setRiskCatalog((prev) => {
+      const idx = prev.findIndex((r) => r.kodeRisiko === item.kodeRisiko);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = item;
+        return next;
+      }
+      return isNew ? [...prev, item] : [...prev, item];
+    });
+
+    // Real-time sync to active assessment rows referencing this risk code
+    setAssessments((prev) =>
+      prev.map((rec) => {
+        if (rec.kodeRisiko !== item.kodeRisiko) return rec;
+        const recYear = rec.tahun || year;
+
+        const syncedControls: ControlAssessmentEntry[] =
+          item.mandatoryControls.map((ctrlName, idx) => {
+            const byName = rec.controls.find((c) => c.controlName === ctrlName);
+            const byIdx =
+              !byName && rec.controls[idx]
+                ? { ...rec.controls[idx], controlName: ctrlName }
+                : null;
+            return (
+              byName ??
+              byIdx ?? {
+                controlName: ctrlName,
+                klaimEfektivitas: 'Belum Dinilai',
+                buktiKlaim: '',
+                catatanKlaim: '',
+                tahun: recYear,
+                periode: 'Triwulan I',
+              }
+            );
+          });
+
+        const prevNonMandatory = rec.nonMandatoryControls ?? [];
+        const syncedNonMandatory: ControlAssessmentEntry[] =
+          item.nonMandatoryControls.map((ctrlName, idx) => {
+            const byName = prevNonMandatory.find(
+              (c) => c.controlName === ctrlName
+            );
+            const byIdx =
+              !byName && prevNonMandatory[idx]
+                ? { ...prevNonMandatory[idx], controlName: ctrlName }
+                : null;
+            return (
+              byName ??
+              byIdx ?? {
+                controlName: ctrlName,
+                klaimEfektivitas: 'Belum Dinilai',
+                buktiKlaim: '',
+                catatanKlaim: '',
+                tahun: recYear,
+                periode: 'Triwulan I',
+              }
+            );
+          });
+
+        return {
+          ...rec,
+          prosesSubproses: item.prosesSubproses,
+          pernyataanRisiko: item.pernyataanRisiko,
+          controls: syncedControls,
+          nonMandatoryControls: syncedNonMandatory,
+        };
+      })
+    );
   };
 
   const handleSaveMonev = (record: MonevSatkerRecord) => {
@@ -343,10 +481,13 @@ export default function App() {
               year={year}
               userRole={userRole}
               assessments={assessments}
+              riskCatalog={riskCatalog}
               riskMatrix={riskMatrix}
               initialSatkerUniqueId={riskEditTarget?.satkerUniqueId}
               initialRiskCode={riskEditTarget?.riskCode}
               onSaveAssessment={handleSaveAssessment}
+              onDeleteAssessment={handleDeleteAssessment}
+              onSaveCatalogRisk={handleSaveCatalogRisk}
               onSaveRiskMatrix={setRiskMatrix}
               onNavigateDashboard={() => handleNavigate('ppg-dashboard')}
             />

@@ -125,7 +125,11 @@ export function DashboardPPGPage({
   scopedAssessments.forEach((rec) => {
     rec.controls.forEach((ctrl) => {
       if (ctrl.klaimEfektivitas === 'Efektif') claimEfektif += 1;
-      else if (ctrl.klaimEfektivitas === 'Sebagian Efektif') claimSebagian += 1;
+      else if (
+        ctrl.klaimEfektivitas === 'Efektif Sebagian' ||
+        (ctrl.klaimEfektivitas as string) === 'Sebagian Efektif'
+      )
+        claimSebagian += 1;
       else if (ctrl.klaimEfektivitas === 'Tidak Efektif')
         claimTidakEfektif += 1;
       else claimBelumDinilai += 1;

@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react';
 import {
-  createDefaultRiskMatrix,
   IMPACT_OPTIONS,
   PROBABILITY_OPTIONS,
 } from '../data/ppgData';
@@ -9,118 +7,85 @@ import { Modal } from './Modal';
 
 interface RiskMatrixConfigModalProps {
   open: boolean;
-  config: RiskMatrixConfig;
-  canEdit: boolean;
+  config?: RiskMatrixConfig;
+  canEdit?: boolean;
   onClose: () => void;
-  onSave: (next: RiskMatrixConfig) => void;
+  onSave?: (next: RiskMatrixConfig) => void;
 }
 
-const CATEGORIES: RiskLevelCategory[] = [
-  'Rendah',
-  'Sedang',
-  'Tinggi',
-  'Sangat Tinggi',
-];
-
-export function getCategoryBadgeClass(category: RiskLevelCategory | null): string {
+export function getCategoryBadgeClass(
+  category: RiskLevelCategory | string | null
+): string {
   switch (category) {
     case 'Rendah':
-      return 'bg-[#e3f5eb] text-[#137a45] border-[#b7e2cb]';
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     case 'Sedang':
-      return 'bg-[#fff2d8] text-[#9a6500] border-[#f0d79d]';
+      return 'bg-amber-50 text-amber-800 border-amber-200';
     case 'Tinggi':
-      return 'bg-[#ffe4d6] text-[#b4440e] border-[#f5bca0]';
+      return 'bg-orange-50 text-orange-700 border-orange-200';
+    case 'Ekstrem':
     case 'Sangat Tinggi':
-      return 'bg-[#fde8e8] text-[#b4232c] border-[#f5c2c7]';
+      return 'bg-red-50 text-red-700 border-red-200';
     default:
-      return 'bg-[#edf1f5] text-[#64748b] border-[#dce3eb]';
+      return 'bg-slate-100 text-slate-600 border-slate-200';
   }
+}
+
+function getFixedCategoryForScore(score: number): RiskLevelCategory {
+  if (score <= 4) return 'Rendah';
+  if (score <= 9) return 'Sedang';
+  if (score <= 12) return 'Tinggi';
+  return 'Ekstrem';
 }
 
 export function RiskMatrixConfigModal({
   open,
-  config,
-  canEdit,
   onClose,
-  onSave,
 }: RiskMatrixConfigModalProps) {
-  const [draft, setDraft] = useState<RiskMatrixConfig>(config);
-
-  useEffect(() => {
-    if (open) {
-      setDraft({
-        ...config,
-        grid: { ...config.grid },
-      });
-    }
-  }, [open, config]);
-
-  const handleCellChange = (
-    prob: number,
-    impact: number,
-    category: RiskLevelCategory
-  ) => {
-    setDraft((prev) => ({
-      ...prev,
-      grid: {
-        ...prev.grid,
-        [`${prob}-${impact}`]: category,
-      },
-    }));
-  };
-
-  const handleReset = () => {
-    setDraft(createDefaultRiskMatrix());
-  };
-
-  const handleSave = () => {
-    onSave({
-      ...draft,
-      updatedAt: new Date().toISOString(),
-    });
-    onClose();
-  };
-
   return (
     <Modal
       open={open}
-      title="Konfigurasi Matriks Risiko (Administrator)"
+      title="Referensi Matriks Risiko 5×4"
       onClose={onClose}
-      onSave={canEdit ? handleSave : undefined}
-      saveLabel="Simpan Konfigurasi Matriks"
+      showFooter={false}
     >
-      <div className="space-y-3 text-[13px] text-[#243247]">
-        <div className="rounded border border-[#f0d79d] bg-[#fff8e8] px-3 py-2 text-[12px] text-[#785716]">
-          Matriks kategori tingkat risiko di bawah dapat dikonfigurasi administrator
-          sesuai ketentuan/SK yang berlaku (5 Level Probabilitas × 4 Level Dampak).
+      <div className="space-y-4 text-[13px] text-[#243247]">
+        {/* Top Scale Legend Pills */}
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-[#dce3eb] bg-[#f8fafc] px-3 py-2.5 text-[12px]">
+          <span className="font-bold text-[#45566c] mr-1">
+            Skala Skor (P × D):
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
+            1–4: Rendah
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-800">
+            5–9: Sedang
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2.5 py-0.5 text-[11px] font-bold text-orange-700">
+            10–12: Tinggi
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[11px] font-bold text-red-700">
+            15–20: Ekstrem
+          </span>
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-[12px] font-bold text-[#536477]">
-            Dasar Ketentuan / Catatan Konfigurasi
-          </label>
-          <input
-            type="text"
-            disabled={!canEdit}
-            value={draft.note}
-            onChange={(e) => setDraft({ ...draft, note: e.target.value })}
-            className="rounded border border-[#cfd9e4] bg-white px-2.5 py-1.5 text-[13px] text-[#243247] disabled:bg-[#f4f7fa]"
-          />
-        </div>
-
-        <div className="overflow-x-auto rounded border border-[#dce3eb]">
+        {/* Fixed 5x4 Reference Matrix Table */}
+        <div className="overflow-x-auto rounded-md border border-[#dce3eb]">
           <table className="w-full border-collapse text-[12px]">
             <thead>
               <tr className="bg-[#f4f7fa]">
-                <th className="border-b border-r border-[#dce3eb] px-2.5 py-2 text-left font-bold text-[#45566c]">
+                <th className="border-b border-r border-[#dce3eb] px-3 py-2.5 text-left font-bold text-[#45566c]">
                   Probabilitas \ Dampak
                 </th>
                 {IMPACT_OPTIONS.map((imp) => (
                   <th
                     key={imp.value}
-                    className="border-b border-[#dce3eb] px-2.5 py-2 text-center font-bold text-[#45566c]"
+                    className="border-b border-[#dce3eb] px-3 py-2.5 text-center font-bold text-[#45566c]"
                   >
-                    {imp.label}
+                    <div>Dampak {imp.value}</div>
+                    <div className="text-[10.5px] font-normal text-[#64748b]">
+                      {imp.label.split('–')[1]?.trim()}
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -128,37 +93,27 @@ export function RiskMatrixConfigModal({
             <tbody>
               {[...PROBABILITY_OPTIONS].reverse().map((prob) => (
                 <tr key={prob.value}>
-                  <td className="border-b border-r border-[#e3e8ee] bg-[#f8fafc] px-2.5 py-2 font-semibold text-[#243247] whitespace-nowrap">
-                    {prob.label}
+                  <td className="border-b border-r border-[#e3e8ee] bg-[#f8fafc] px-3 py-2.5 font-semibold text-[#243247] whitespace-nowrap">
+                    <div>Prob. {prob.value}</div>
+                    <div className="text-[10.5px] font-normal text-[#64748b]">
+                      {prob.label.split('–')[1]?.trim()}
+                    </div>
                   </td>
                   {IMPACT_OPTIONS.map((imp) => {
-                    const key = `${prob.value}-${imp.value}`;
-                    const currentCat = draft.grid[key] ?? 'Sedang';
+                    const score = prob.value * imp.value;
+                    const category = getFixedCategoryForScore(score);
                     return (
                       <td
-                        key={key}
-                        className="border-b border-[#e3e8ee] px-2 py-1.5 text-center"
+                        key={`${prob.value}-${imp.value}`}
+                        className="border-b border-[#e3e8ee] px-2.5 py-2 text-center"
                       >
-                        <select
-                          disabled={!canEdit}
-                          value={currentCat}
-                          onChange={(e) =>
-                            handleCellChange(
-                              prob.value,
-                              imp.value,
-                              e.target.value as RiskLevelCategory
-                            )
-                          }
-                          className={`w-full rounded border px-1.5 py-1 text-[11px] font-bold ${getCategoryBadgeClass(
-                            currentCat
+                        <span
+                          className={`inline-flex w-full items-center justify-center rounded-md border px-2 py-1.5 text-[11.5px] font-bold tabular-nums ${getCategoryBadgeClass(
+                            category
                           )}`}
                         >
-                          {CATEGORIES.map((cat) => (
-                            <option key={cat} value={cat}>
-                              {cat}
-                            </option>
-                          ))}
-                        </select>
+                          {score} ({category})
+                        </span>
                       </td>
                     );
                   })}
@@ -168,20 +123,16 @@ export function RiskMatrixConfigModal({
           </table>
         </div>
 
-        {canEdit && (
-          <div className="flex justify-between items-center pt-1">
-            <button
-              type="button"
-              onClick={handleReset}
-              className="cursor-pointer rounded border border-[#ccd7e3] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#536477] hover:bg-[#f8fafc]"
-            >
-              Reset ke Default
-            </button>
-            <span className="text-[11px] text-[#718096]">
-              Perubahan langsung diterapkan pada hasil Inherent &amp; Residual.
-            </span>
-          </div>
-        )}
+        {/* Clean Footer with only Tutup */}
+        <div className="flex justify-end border-t border-[#e9eef4] pt-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="cursor-pointer rounded-md border border-[#ccd7e3] bg-white px-4 py-2 text-[13px] font-semibold text-[#243247] hover:bg-slate-50 transition-colors"
+          >
+            Tutup
+          </button>
+        </div>
       </div>
     </Modal>
   );

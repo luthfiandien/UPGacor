@@ -29,13 +29,14 @@ export interface RiskLibraryItem {
   penyebabRisiko: string[];
   dampakRisiko: string[];
   mandatoryControls: string[];
+  nonMandatoryControls: string[];
 }
 
 export type ControlEffectivenessClaim =
   | 'Belum Dinilai'
-  | 'Tidak Efektif'
-  | 'Sebagian Efektif'
-  | 'Efektif';
+  | 'Efektif'
+  | 'Efektif Sebagian'
+  | 'Tidak Efektif';
 
 export type QuarterPeriod =
   | 'Triwulan I'
@@ -52,7 +53,7 @@ export interface ControlAssessmentEntry {
   periode: QuarterPeriod;
 }
 
-export type RiskLevelCategory = 'Rendah' | 'Sedang' | 'Tinggi' | 'Sangat Tinggi';
+export type RiskLevelCategory = 'Rendah' | 'Sedang' | 'Tinggi' | 'Ekstrem';
 
 // 5 probability levels (1..5) x 4 impact levels (1..4)
 export type RiskMatrixGrid = Record<string, RiskLevelCategory>;
@@ -63,19 +64,25 @@ export interface RiskMatrixConfig {
   grid: RiskMatrixGrid; // key: `${prob}-${impact}`
 }
 
+export type RiskAssessmentStatus = 'Belum Dinilai' | 'Draft' | 'Selesai';
+
 export interface RiskAssessmentRecord {
   id: string; // `${satkerUniqueId}::${kodeRisiko}`
   satkerUniqueId: string;
   upgLevel: UpgLevel;
   kodeSatker: number;
   namaSatker: string;
+  tahun?: string;
   kodeRisiko: string;
+  prosesSubproses?: string;
   pernyataanRisiko: string;
   controls: ControlAssessmentEntry[];
+  nonMandatoryControls?: ControlAssessmentEntry[];
   inherentProb: number | '';
   inherentImpact: number | '';
   residualProb: number | '';
   residualImpact: number | '';
+  savedAsDraft?: boolean;
   updatedAt: string;
 }
 

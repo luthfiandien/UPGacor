@@ -1,15 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   BookOpen,
   CheckCircle2,
+  Edit3,
   ExternalLink,
+  Lock,
+  Plus,
+  Search,
   Settings2,
   ShieldAlert,
+  SlidersHorizontal,
+  Trash2,
 } from 'lucide-react';
 import {
+  BADAN_PENGAWASAN_SATKER,
+  createEmptyAssessmentForRisk,
   getMatrixRiskCategory,
+  getRiskAssessmentStatus,
   IMPACT_OPTIONS,
+  isControlEntryComplete,
+  isControlEntryTouched,
   isRiskAssessmentComplete,
   isValidHttpsUrl,
   MASTER_SATKER_LIST,
@@ -23,33 +34,44 @@ import {
   MasterSatker,
   QuarterPeriod,
   RiskAssessmentRecord,
+  RiskAssessmentStatus,
+  RiskLibraryItem,
   RiskMatrixConfig,
   UpgLevel,
   UserRole,
 } from '../../types/upg';
+import { AddRiskPickerModal } from '../AddRiskPickerModal';
+import { DeleteConfirmModal } from '../DeleteConfirmModal';
+import { RiskAssessmentModal } from '../RiskAssessmentModal';
 import { RiskLibraryModal } from '../RiskLibraryModal';
 import {
   getCategoryBadgeClass,
   RiskMatrixConfigModal,
 } from '../RiskMatrixConfigModal';
+import { ToastContainer, ToastItem, ToastVariant } from '../ToastContainer';
 
 interface PenilaianRisikoPageProps {
   year: string;
   userRole: UserRole;
   assessments: RiskAssessmentRecord[];
+  riskCatalog?: RiskLibraryItem[];
   riskMatrix: RiskMatrixConfig;
   initialSatkerUniqueId?: string | null;
   initialRiskCode?: string | null;
   onSaveAssessment: (record: RiskAssessmentRecord) => void;
+  onDeleteAssessment: (id: string) => void;
+  onSaveCatalogRisk?: (item: RiskLibraryItem, isNew: boolean) => void;
   onSaveRiskMatrix: (config: RiskMatrixConfig) => void;
   onNavigateDashboard: () => void;
 }
 
+const MAX_RISKS_PER_PERIOD = 10;
+
 const CLAIM_OPTIONS: ControlEffectivenessClaim[] = [
   'Belum Dinilai',
-  'Tidak Efektif',
-  'Sebagian Efektif',
   'Efektif',
+  'Efektif Sebagian',
+  'Tidak Efektif',
 ];
 
 const PERIOD_OPTIONS: QuarterPeriod[] = [
@@ -63,9 +85,10 @@ const YEAR_OPTIONS = ['2025', '2026', '2027'];
 
 function buildDefaultControls(
   riskCode: string,
-  defaultYear: string
+  defaultYear: string,
+  catalog: RiskLibraryItem[]
 ): ControlAssessmentEntry[] {
-  const lib = RISK_CONTROL_LIBRARY.find((r) => r.kodeRisiko === riskCode);
+  const lib = catalog.find((r) => r.kodeRisiko === riskCode);
   if (!lib) return [];
   return lib.mandatoryControls.map((ctrlName) => ({
     controlName: ctrlName,
@@ -77,17 +100,667 @@ function buildDefaultControls(
   }));
 }
 
+function getStatusPillBadgeClass(status: RiskAssessmentStatus): string {
+  switch (status) {
+    case 'Selesai':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'Draft':
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    default:
+      return 'border-slate-200 bg-slate-100 text-slate-600';
+  }
+}
+
+/* ============================================================================
+ * REDESIGNED SELF-ASSESSMENT WORKFLOW FOR UPG PUSAT (BADAN PENGAWASAN)
+ * ==========================================================================*/
+function UpgPusatSelfAssessmentView({
+  year,
+  assessments,
+  riskCatalog,
+  riskMatrix,
+  initialRiskCode,
+  onSaveAssessment,
+  onDeleteAssessment,
+  onSaveCatalogRisk,
+  onSaveRiskMatrix,
+}: {
+  year: string;
+  assessments: RiskAssessmentRecord[];
+  riskCatalog: RiskLibraryItem[];
+  riskMatrix: RiskMatrixConfig;
+  initialRiskCode?: string | null;
+  onSaveAssessment: (record: RiskAssessmentRecord) => void;
+  onDeleteAssessment: (id: string) => void;
+  onSaveCatalogRisk?: (item: RiskLibraryItem, isNew: boolean) => void;
+  onSaveRiskMatrix: (config: RiskMatrixConfig) => void;
+}) {
+  const [statusFilter, setStatusFilter] = useState<
+    'Semua' | RiskAssessmentStatus
+  >('Semua');
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [addPickerOpen, setAddPickerOpen] = useState(false);
+  const [matrixModalOpen, setMatrixModalOpen] = useState(false);
+  const [editingRecord, setEditingRecord] =
+    useState<RiskAssessmentRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] =
+    useState<RiskAssessmentRecord | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const pushToast = useCallback((variant: ToastVariant, message: string) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setToasts((prev) => [...prev, { id, variant, message }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Records strictly scoped to Badan Pengawasan and the active period year
+  const bawasRecords = useMemo(() => {
+    return assessments
+      .filter(
+        (a) =>
+          a.satkerUniqueId === BADAN_PENGAWASAN_SATKER.uniqueId &&
+          (a.tahun ?? year) === year
+      )
+      .slice(0, MAX_RISKS_PER_PERIOD);
+  }, [assessments, year]);
+
+  // If navigated from Dashboard PPG with an initialRiskCode, open assessment modal directly
+  useEffect(() => {
+    if (!initialRiskCode) return;
+    const match = bawasRecords.find((r) => r.kodeRisiko === initialRiskCode);
+    if (match) {
+      setEditingRecord(match);
+    }
+  }, [initialRiskCode, bawasRecords]);
+
+  const enrichedRows = useMemo(() => {
+    return bawasRecords.map((rec) => {
+      const lib = riskCatalog.find(
+        (item) => item.kodeRisiko === rec.kodeRisiko
+      );
+      const status = getRiskAssessmentStatus(rec);
+      const totalMandatory =
+        rec.controls.length || lib?.mandatoryControls.length || 0;
+      const completedMandatory = rec.controls.filter(
+        isControlEntryComplete
+      ).length;
+      const filledNonMandatory = (rec.nonMandatoryControls ?? []).filter(
+        isControlEntryTouched
+      ).length;
+
+      const inherentScore =
+        rec.inherentProb !== '' && rec.inherentImpact !== ''
+          ? Number(rec.inherentProb) * Number(rec.inherentImpact)
+          : null;
+      const inherentCategory = getMatrixRiskCategory(
+        riskMatrix,
+        rec.inherentProb,
+        rec.inherentImpact
+      );
+
+      const residualScore =
+        rec.residualProb !== '' && rec.residualImpact !== ''
+          ? Number(rec.residualProb) * Number(rec.residualImpact)
+          : null;
+      const residualCategory = getMatrixRiskCategory(
+        riskMatrix,
+        rec.residualProb,
+        rec.residualImpact
+      );
+
+      return {
+        record: rec,
+        prosesBisnis:
+          lib?.prosesSubproses || rec.prosesSubproses || 'Proses Bisnis PPG',
+        peristiwaRisiko: lib?.pernyataanRisiko || rec.pernyataanRisiko,
+        status,
+        totalMandatory,
+        completedMandatory,
+        filledNonMandatory,
+        inherentScore,
+        inherentCategory,
+        residualScore,
+        residualCategory,
+      };
+    });
+  }, [bawasRecords, riskCatalog, riskMatrix]);
+
+  const counts = useMemo(() => {
+    const belumDinilai = enrichedRows.filter(
+      (r) => r.status === 'Belum Dinilai'
+    ).length;
+    const draft = enrichedRows.filter((r) => r.status === 'Draft').length;
+    const selesai = enrichedRows.filter((r) => r.status === 'Selesai').length;
+    return {
+      Semua: enrichedRows.length,
+      'Belum Dinilai': belumDinilai,
+      Draft: draft,
+      Selesai: selesai,
+    };
+  }, [enrichedRows]);
+
+  const filteredRows = useMemo(() => {
+    if (statusFilter === 'Semua') return enrichedRows;
+    return enrichedRows.filter((r) => r.status === statusFilter);
+  }, [enrichedRows, statusFilter]);
+
+  const selectedRiskCodes = useMemo(
+    () => bawasRecords.map((r) => r.kodeRisiko),
+    [bawasRecords]
+  );
+
+  const isQuotaFull = bawasRecords.length >= MAX_RISKS_PER_PERIOD;
+
+  const handleAddRiskFromCatalog = (risk: RiskLibraryItem) => {
+    if (selectedRiskCodes.includes(risk.kodeRisiko)) {
+      pushToast(
+        'info',
+        `Risiko ${risk.kodeRisiko} sudah ada di daftar penilaian.`
+      );
+      return;
+    }
+    if (bawasRecords.length >= MAX_RISKS_PER_PERIOD) {
+      pushToast(
+        'warning',
+        `Kuota maksimal ${MAX_RISKS_PER_PERIOD} risiko telah tercapai.`
+      );
+      return;
+    }
+    const newRecord = createEmptyAssessmentForRisk(
+      BADAN_PENGAWASAN_SATKER,
+      risk,
+      year
+    );
+    onSaveAssessment(newRecord);
+    pushToast(
+      'success',
+      `Risiko ${risk.kodeRisiko} berhasil ditambahkan ke daftar penilaian.`
+    );
+  };
+
+  const handleSaveModalAssessment = (
+    updated: RiskAssessmentRecord,
+    computedStatus: RiskAssessmentStatus
+  ) => {
+    onSaveAssessment(updated);
+    if (computedStatus === 'Selesai') {
+      pushToast(
+        'success',
+        `Penilaian ${updated.kodeRisiko} berhasil disimpan dengan status Selesai.`
+      );
+    } else if (computedStatus === 'Draft') {
+      pushToast(
+        'info',
+        `Progres penilaian ${updated.kodeRisiko} berhasil disimpan sebagai Draft.`
+      );
+    } else {
+      pushToast(
+        'info',
+        `Penilaian ${updated.kodeRisiko} disimpan dengan status Belum Dinilai.`
+      );
+    }
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return;
+    onDeleteAssessment(deleteTarget.id);
+    pushToast(
+      'success',
+      `Risiko ${deleteTarget.kodeRisiko} dihapus dari daftar penilaian.`
+    );
+    setDeleteTarget(null);
+  };
+
+  const handleSaveMatrix = (next: RiskMatrixConfig) => {
+    onSaveRiskMatrix(next);
+    pushToast('success', 'Konfigurasi Matriks Risiko 5×4 berhasil disimpan.');
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* 1. LOCKED STATIC IDENTITY & QUOTA BAR */}
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#dce3eb] bg-white px-4 py-3 shadow-[0_2px_6px_rgba(27,53,85,0.04)]">
+        {/* Left: Locked Static Badge */}
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-md border border-[#c7daf0] bg-[#eef5fc] px-3 py-1.5 text-[13px] font-bold text-[#0F4C81]">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            <span>Badan Pengawasan</span>
+          </span>
+        </div>
+
+        {/* Right: Quota Badge, Completion Badge, Matrix Config Button */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span
+            className={`inline-flex items-center rounded-md border px-3 py-1.5 text-[12px] font-bold tabular-nums ${
+              isQuotaFull
+                ? 'border-amber-200 bg-amber-50 text-amber-800'
+                : 'border-[#dce3eb] bg-[#f8fafc] text-[#1d3554]'
+            }`}
+          >
+            Kuota Risiko: {bawasRecords.length} / {MAX_RISKS_PER_PERIOD} (Maks.{' '}
+            {MAX_RISKS_PER_PERIOD})
+          </span>
+
+          <span className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[12px] font-bold text-emerald-700 tabular-nums">
+            Selesai Dinilai: {counts.Selesai} / {bawasRecords.length}
+          </span>
+
+          <button
+            type="button"
+            onClick={() => setMatrixModalOpen(true)}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-[#cfd9e4] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#1d3554] hover:bg-slate-50 transition-colors"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5 text-[#0F4C81]" />
+            <span>Konfigurasi Matriks Risiko (Admin)</span>
+          </button>
+        </div>
+      </section>
+
+      {/* 2. CLEAN TOOLBAR ABOVE THE MAIN TABLE */}
+      <section className="rounded-lg border border-[#dce3eb] bg-white shadow-[0_2px_6px_rgba(27,53,85,0.04)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e9eef4] px-4 py-3.5">
+          {/* Left: Status Filter Pills */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              ['Semua', 'Belum Dinilai', 'Draft', 'Selesai'] as const
+            ).map((statusKey) => {
+              const active = statusFilter === statusKey;
+              return (
+                <button
+                  key={statusKey}
+                  type="button"
+                  onClick={() => setStatusFilter(statusKey)}
+                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12.5px] font-semibold transition-colors ${
+                    active
+                      ? 'border-[#0F4C81] bg-[#0F4C81] text-white'
+                      : 'border-[#dce3eb] bg-[#f8fafc] text-[#45566c] hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{statusKey}</span>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums leading-none ${
+                      active
+                        ? 'bg-white/20 text-white'
+                        : 'bg-white text-[#52647a] border border-[#dce3eb]'
+                    }`}
+                  >
+                    {counts[statusKey]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Right: Prominent RED Pustaka Risiko + Primary Navy + Tambah Risiko */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setLibraryOpen(true)}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-[13px] font-semibold text-white shadow-xs hover:bg-red-700 transition-colors whitespace-nowrap"
+            >
+              <Search className="h-4 w-4" />
+              <span>Pustaka Risiko</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={isQuotaFull}
+              onClick={() => setAddPickerOpen(true)}
+              className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-[13px] font-semibold whitespace-nowrap transition-colors ${
+                isQuotaFull
+                  ? 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400'
+                  : 'cursor-pointer bg-[#0F4C81] text-white shadow-xs hover:bg-[#0b3b66]'
+              }`}
+            >
+              {!isQuotaFull && <Plus className="h-4 w-4" />}
+              <span>
+                {isQuotaFull ? 'Kuota Maksimal (10/10)' : 'Tambah Risiko'}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* 3. MAIN ASSESSMENT TABLE (8 COLUMNS, MAX 10 RISKS) */}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1040px] border-collapse text-left">
+            <thead>
+              <tr className="border-b border-[#dce3eb] bg-[#f4f7fa]">
+                <th className="w-[52px] px-3.5 py-3 text-center text-[11px] font-bold uppercase tracking-wider text-[#45566c]">
+                  No.
+                </th>
+                <th className="w-[115px] px-3.5 py-3 text-[11px] font-bold uppercase tracking-wider text-[#45566c]">
+                  Kode Risiko
+                </th>
+                <th className="px-3.5 py-3 text-[11px] font-bold uppercase tracking-wider text-[#45566c]">
+                  Peristiwa Risiko &amp; Proses Bisnis
+                </th>
+                <th className="w-[180px] px-3.5 py-3 text-[11px] font-bold uppercase tracking-wider text-[#45566c]">
+                  Kontrol Berjalan
+                </th>
+                <th className="w-[135px] px-3.5 py-3 text-[11px] font-bold uppercase tracking-wider text-[#45566c]">
+                  Risiko Inherent
+                </th>
+                <th className="w-[135px] px-3.5 py-3 text-[11px] font-bold uppercase tracking-wider text-[#45566c]">
+                  Risiko Residual
+                </th>
+                <th className="w-[125px] px-3.5 py-3 text-[11px] font-bold uppercase tracking-wider text-[#45566c]">
+                  Status
+                </th>
+                <th className="w-[170px] px-3.5 py-3 text-right text-[11px] font-bold uppercase tracking-wider text-[#45566c]">
+                  Aksi
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#e9eef4] text-[13px] text-[#243247]">
+              {filteredRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-6 py-12 text-center">
+                    {bawasRecords.length === 0 ? (
+                      <div className="mx-auto max-w-md space-y-3">
+                        <div className="text-[14px] font-bold text-[#1d3554]">
+                          Belum ada risiko yang dipilih untuk periode {year}
+                        </div>
+                        <p className="m-0 text-[12.5px] text-[#64748b]">
+                          Silakan pilih hingga {MAX_RISKS_PER_PERIOD} risiko
+                          gratifikasi dari Pustaka Risiko atau klik tombol{' '}
+                          <b>+ Tambah Risiko</b> untuk memulai penilaian mandiri
+                          Badan Pengawasan.
+                        </p>
+                        <div className="flex justify-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setLibraryOpen(true)}
+                            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-red-600 px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-red-700"
+                          >
+                            <Search className="h-3.5 w-3.5" />
+                            <span>Buka Pustaka Risiko</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAddPickerOpen(true)}
+                            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-[#0F4C81] px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-[#0b3b66]"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            <span>Tambah Risiko</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-[13px] text-[#718096]">
+                        Tidak ada risiko dengan status{' '}
+                        <b>&ldquo;{statusFilter}&rdquo;</b>.
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ) : (
+                filteredRows.map((row, index) => {
+                  const mandatoryAllDone =
+                    row.totalMandatory > 0 &&
+                    row.completedMandatory === row.totalMandatory;
+
+                  return (
+                    <tr
+                      key={row.record.id}
+                      className="transition-colors hover:bg-[#f8fbff]"
+                    >
+                      {/* 1. No. */}
+                      <td className="px-3.5 py-3.5 text-center font-semibold text-[#52647a] tabular-nums">
+                        {index + 1}
+                      </td>
+
+                      {/* 2. Kode Risiko */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap">
+                        <span className="font-mono-num inline-block rounded-md border border-[#c7daf0] bg-[#eef5fc] px-2.5 py-1 text-[12px] font-bold text-[#0F4C81]">
+                          {row.record.kodeRisiko}
+                        </span>
+                      </td>
+
+                      {/* 3. Peristiwa Risiko & Proses Bisnis */}
+                      <td className="px-3.5 py-3.5">
+                        <div className="font-semibold leading-snug text-[#1d3554]">
+                          {row.peristiwaRisiko}
+                        </div>
+                        <div className="mt-1 text-[12px] text-[#64748b]">
+                          Proses Bisnis:{' '}
+                          <span className="font-medium text-[#45566c]">
+                            {row.prosesBisnis}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* 4. Kontrol Berjalan */}
+                      <td className="px-3.5 py-3.5">
+                        <div className="flex flex-col items-start gap-1">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11.5px] font-bold tabular-nums ${
+                              mandatoryAllDone
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                : row.completedMandatory > 0
+                                  ? 'border-amber-200 bg-amber-50 text-amber-800'
+                                  : 'border-slate-200 bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {row.completedMandatory}/{row.totalMandatory} Wajib
+                            Terisi
+                          </span>
+
+                          {row.filledNonMandatory > 0 && (
+                            <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+                              +{row.filledNonMandatory} Pelengkap
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* 5. Risiko Inherent */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap">
+                        {row.inherentScore !== null && row.inherentCategory ? (
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11.5px] font-bold tabular-nums ${getCategoryBadgeClass(
+                              row.inherentCategory
+                            )}`}
+                          >
+                            {row.inherentCategory} ({row.inherentScore})
+                          </span>
+                        ) : (
+                          <span className="text-[13px] font-medium text-slate-400">
+                            —
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 6. Risiko Residual */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap">
+                        {row.residualScore !== null && row.residualCategory ? (
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11.5px] font-bold tabular-nums ${getCategoryBadgeClass(
+                              row.residualCategory
+                            )}`}
+                          >
+                            {row.residualCategory} ({row.residualScore})
+                          </span>
+                        ) : (
+                          <span className="text-[13px] font-medium text-slate-400">
+                            —
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 7. Status (passive, non-clickable automatic status pill) */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11.5px] font-bold ${getStatusPillBadgeClass(
+                            row.status
+                          )}`}
+                        >
+                          {row.status}
+                        </span>
+                      </td>
+
+                      {/* 8. Aksi */}
+                      <td className="px-3.5 py-3.5 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setEditingRecord(row.record)}
+                            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors ${
+                              row.status === 'Belum Dinilai'
+                                ? 'bg-[#0F4C81] text-white hover:bg-[#0b3b66]'
+                                : 'border border-[#0F4C81] bg-white text-[#0F4C81] hover:bg-[#eef5fc]'
+                            }`}
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                            <span>
+                              {row.status === 'Belum Dinilai'
+                                ? 'Isi Penilaian'
+                                : 'Edit'}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(row.record)}
+                            title={`Hapus ${row.record.kodeRisiko}`}
+                            aria-label={`Hapus risiko ${row.record.kodeRisiko}`}
+                            className="inline-flex cursor-pointer items-center justify-center rounded-md border border-red-200 bg-white p-1.5 text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Modals */}
+      <RiskLibraryModal
+        open={libraryOpen}
+        riskCatalog={riskCatalog}
+        selectedRiskCodes={selectedRiskCodes}
+        maxQuota={MAX_RISKS_PER_PERIOD}
+        canManageCatalog={true}
+        onClose={() => setLibraryOpen(false)}
+        onUseRisk={handleAddRiskFromCatalog}
+        onSaveCatalogRisk={onSaveCatalogRisk}
+        onNotify={pushToast}
+      />
+
+      <AddRiskPickerModal
+        open={addPickerOpen}
+        riskCatalog={riskCatalog}
+        selectedRiskCodes={selectedRiskCodes}
+        maxQuota={MAX_RISKS_PER_PERIOD}
+        onClose={() => setAddPickerOpen(false)}
+        onAddRisk={handleAddRiskFromCatalog}
+      />
+
+      <RiskAssessmentModal
+        open={editingRecord !== null}
+        record={editingRecord}
+        riskCatalog={riskCatalog}
+        riskMatrix={riskMatrix}
+        year={year}
+        onClose={() => setEditingRecord(null)}
+        onSave={handleSaveModalAssessment}
+      />
+
+      <DeleteConfirmModal
+        open={deleteTarget !== null}
+        kodeRisiko={deleteTarget?.kodeRisiko ?? ''}
+        pernyataanRisiko={deleteTarget?.pernyataanRisiko ?? ''}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+      />
+
+      <RiskMatrixConfigModal
+        open={matrixModalOpen}
+        config={riskMatrix}
+        canEdit={true}
+        onClose={() => setMatrixModalOpen(false)}
+        onSave={handleSaveMatrix}
+      />
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+    </div>
+  );
+}
+
+/* ============================================================================
+ * MAIN COMPONENT (Routes UPG Pusat to Redesigned View, Preserves Other Roles)
+ * ==========================================================================*/
 export function PenilaianRisikoPage({
   year,
   userRole,
   assessments,
+  riskCatalog = RISK_CONTROL_LIBRARY,
+  riskMatrix,
+  initialSatkerUniqueId,
+  initialRiskCode,
+  onSaveAssessment,
+  onDeleteAssessment,
+  onSaveCatalogRisk,
+  onSaveRiskMatrix,
+  onNavigateDashboard,
+}: PenilaianRisikoPageProps) {
+  if (userRole === 'UPG Pusat') {
+    return (
+      <UpgPusatSelfAssessmentView
+        year={year}
+        assessments={assessments}
+        riskCatalog={riskCatalog}
+        riskMatrix={riskMatrix}
+        initialRiskCode={initialRiskCode}
+        onSaveAssessment={onSaveAssessment}
+        onDeleteAssessment={onDeleteAssessment}
+        onSaveCatalogRisk={onSaveCatalogRisk}
+        onSaveRiskMatrix={onSaveRiskMatrix}
+      />
+    );
+  }
+
+  return (
+    <LegacyMultiSatkerView
+      year={year}
+      userRole={userRole}
+      assessments={assessments}
+      riskCatalog={riskCatalog}
+      riskMatrix={riskMatrix}
+      initialSatkerUniqueId={initialSatkerUniqueId}
+      initialRiskCode={initialRiskCode}
+      onSaveAssessment={onSaveAssessment}
+      onSaveRiskMatrix={onSaveRiskMatrix}
+      onNavigateDashboard={onNavigateDashboard}
+    />
+  );
+}
+
+/* ============================================================================
+ * EXISTING MULTI-SATKER VIEW FOR UPG TINGKAT 1, UPG TINGKAT 2, & SATKER
+ * ==========================================================================*/
+function LegacyMultiSatkerView({
+  year,
+  userRole,
+  assessments,
+  riskCatalog = RISK_CONTROL_LIBRARY,
   riskMatrix,
   initialSatkerUniqueId,
   initialRiskCode,
   onSaveAssessment,
   onSaveRiskMatrix,
   onNavigateDashboard,
-}: PenilaianRisikoPageProps) {
+}: Omit<PenilaianRisikoPageProps, 'onDeleteAssessment' | 'onSaveCatalogRisk'>) {
   const allowedUpgLevels: UpgLevel[] =
     userRole === 'UPG Tingkat 2'
       ? ['UPG Tingkat 3']
@@ -98,13 +771,9 @@ export function PenilaianRisikoPage({
 
   const canEdit = true;
   const canConfigMatrix =
-    userRole === 'UPG Tingkat 1' ||
-    userRole === 'UPG Tingkat 2' ||
-    userRole === 'UPG Pusat';
+    userRole === 'UPG Tingkat 1' || userRole === 'UPG Tingkat 2';
   const canReturnToDashboard =
-    userRole === 'UPG Tingkat 1' ||
-    userRole === 'UPG Tingkat 2' ||
-    userRole === 'UPG Pusat';
+    userRole === 'UPG Tingkat 1' || userRole === 'UPG Tingkat 2';
 
   const initialSatker: MasterSatker | undefined = initialSatkerUniqueId
     ? MASTER_SATKER_LIST.find((s) => s.uniqueId === initialSatkerUniqueId)
@@ -142,7 +811,6 @@ export function PenilaianRisikoPage({
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [matrixModalOpen, setMatrixModalOpen] = useState(false);
 
-  // Sync if launched from Dashboard PPG Edit button
   useEffect(() => {
     if (initialSatkerUniqueId) {
       const sat = MASTER_SATKER_LIST.find(
@@ -163,7 +831,6 @@ export function PenilaianRisikoPage({
     }
   }, [initialSatkerUniqueId, initialRiskCode, assessments]);
 
-  // Enforce role-based UPG scope whenever active role changes
   useEffect(() => {
     const scopeLevels: UpgLevel[] =
       userRole === 'UPG Tingkat 2'
@@ -214,9 +881,8 @@ export function PenilaianRisikoPage({
     satkersForLevel.find((s) => s.uniqueId === selectedSatkerId) ?? null;
 
   const activeRiskLib =
-    RISK_CONTROL_LIBRARY.find((r) => r.kodeRisiko === selectedRiskCode) ?? null;
+    riskCatalog.find((r) => r.kodeRisiko === selectedRiskCode) ?? null;
 
-  // Populate form from saved assessment when satker + risk changes
   useEffect(() => {
     setErrors([]);
     if (!selectedRiskCode) {
@@ -237,10 +903,7 @@ export function PenilaianRisikoPage({
       : undefined;
 
     if (existing) {
-      // Ensure all Mandatory Controls from Library are present
-      const lib = RISK_CONTROL_LIBRARY.find(
-        (r) => r.kodeRisiko === selectedRiskCode
-      );
+      const lib = riskCatalog.find((r) => r.kodeRisiko === selectedRiskCode);
       const mergedControls: ControlAssessmentEntry[] = (
         lib?.mandatoryControls ?? []
       ).map((ctrlName) => {
@@ -264,13 +927,13 @@ export function PenilaianRisikoPage({
       setResidualProb(existing.residualProb);
       setResidualImpact(existing.residualImpact);
     } else {
-      setControls(buildDefaultControls(selectedRiskCode, year));
+      setControls(buildDefaultControls(selectedRiskCode, year, riskCatalog));
       setInherentProb('');
       setInherentImpact('');
       setResidualProb('');
       setResidualImpact('');
     }
-  }, [selectedSatkerId, selectedRiskCode, assessments, year]);
+  }, [selectedSatkerId, selectedRiskCode, assessments, year, riskCatalog]);
 
   const handleUpgChange = (nextUpg: UpgLevel | '') => {
     setSelectedUpg(nextUpg);
@@ -358,7 +1021,9 @@ export function PenilaianRisikoPage({
       upgLevel: activeSatker.upgLevel,
       kodeSatker: activeSatker.kodeSatker,
       namaSatker: activeSatker.namaSatker,
+      tahun: year,
       kodeRisiko: activeRiskLib.kodeRisiko,
+      prosesSubproses: activeRiskLib.prosesSubproses,
       pernyataanRisiko: activeRiskLib.pernyataanRisiko,
       controls: controls.map((c) => ({ ...c, buktiKlaim: c.buktiKlaim.trim() })),
       inherentProb,
@@ -422,7 +1087,6 @@ export function PenilaianRisikoPage({
 
   return (
     <div className="space-y-4">
-
       {saveBanner && (
         <div
           className={`flex items-start gap-2.5 rounded-[6px] border px-4 py-3 text-[13px] ${
@@ -450,7 +1114,7 @@ export function PenilaianRisikoPage({
         </div>
       )}
 
-      {/* BAGIAN A: IDENTITAS SATKER BERDASARKAN TINGKATAN UPG */}
+      {/* BAGIAN A: IDENTITAS SATKER */}
       <section className="rounded-[7px] border border-[#dce3eb] bg-white p-[18px] shadow-[0_2px_5px_rgba(38,56,75,0.03)]">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[#e9eef4] pb-2.5">
           <div>
@@ -542,15 +1206,14 @@ export function PenilaianRisikoPage({
         )}
       </section>
 
-      {/* BAGIAN B: PEMILIHAN RISIKO GRATIFIKASI */}
+      {/* BAGIAN B: PEMILIHAN RISIKO */}
       <section className="rounded-[7px] border border-[#dce3eb] bg-white p-[18px] shadow-[0_2px_5px_rgba(38,56,75,0.03)]">
         <div className="mb-3 border-b border-[#e9eef4] pb-2.5">
           <h2 className="m-0 text-[15px] font-bold text-[#1d3554]">
             B. Pemilihan Risiko Gratifikasi
           </h2>
           <p className="m-0 mt-0.5 text-[12px] text-[#718096]">
-            Pilih risiko gratifikasi yang akan dinilai. Untuk melihat profil lengkap
-            risiko, gunakan tombol Risk and Control Library.
+            Pilih risiko gratifikasi yang akan dinilai atau buka Pustaka Risiko.
           </p>
         </div>
 
@@ -566,7 +1229,7 @@ export function PenilaianRisikoPage({
               className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247] disabled:bg-[#f4f7fa]"
             >
               <option value="">-- Pilih Risiko Gratifikasi --</option>
-              {RISK_CONTROL_LIBRARY.map((risk) => (
+              {riskCatalog.map((risk) => (
                 <option key={risk.kodeRisiko} value={risk.kodeRisiko}>
                   {risk.kodeRisiko} — {risk.pernyataanRisiko}
                 </option>
@@ -580,11 +1243,10 @@ export function PenilaianRisikoPage({
             className="inline-flex cursor-pointer items-center gap-2 rounded border border-[#08a9c4] bg-white px-3.5 py-2 text-[13px] font-semibold text-[#0796b0] hover:bg-[#f0fbfd] transition-colors whitespace-nowrap"
           >
             <BookOpen className="h-4 w-4" />
-            <span>Risk and Control Library</span>
+            <span>Pustaka Risiko</span>
           </button>
         </div>
 
-        {/* PENTING: Hanya menampilkan Kode Risiko dan Pernyataan Risiko yang dipilih */}
         {activeRiskLib && (
           <div className="mt-3.5 rounded-[6px] border border-[#c7ddf5] bg-[#f4f9ff] p-3.5">
             <div className="flex items-start gap-3">
@@ -612,16 +1274,12 @@ export function PenilaianRisikoPage({
         )}
       </section>
 
-      {/* BAGIAN C: KONTROL BERJALAN (MANDATORY CONTROL) */}
+      {/* BAGIAN C: KONTROL BERJALAN */}
       <section className="rounded-[7px] border border-[#dce3eb] bg-white p-[18px] shadow-[0_2px_5px_rgba(38,56,75,0.03)]">
         <div className="mb-3 border-b border-[#e9eef4] pb-2.5">
           <h2 className="m-0 text-[15px] font-bold text-[#1d3554]">
             C. Kontrol Berjalan (Mandatory Control)
           </h2>
-          <p className="m-0 mt-0.5 text-[12px] text-[#718096]">
-            Mandatory Control otomatis dimuat dari Risk and Control Library sesuai
-            risiko yang dipilih. Lengkapi klaim efektivitas untuk setiap kontrol.
-          </p>
         </div>
 
         {!activeRiskLib ? (
@@ -649,14 +1307,10 @@ export function PenilaianRisikoPage({
                         {ctrl.controlName}
                       </span>
                     </div>
-                    <span className="text-[11px] font-semibold text-[#137a45]">
-                      Dipetakan otomatis dari Library
-                    </span>
                   </div>
 
                   <div className="grid grid-cols-12 gap-3 max-md:grid-cols-1">
-                    {/* 1. Klaim Efektivitas Kontrol */}
-                    <div className="col-span-4 max-md:col-span-1 flex flex-col gap-1">
+                    <div className="col-span-6 max-md:col-span-1 flex flex-col gap-1">
                       <label className="text-[12px] font-bold text-[#536477]">
                         1. Klaim Efektivitas Kontrol{' '}
                         <span className="text-[#dc3545]">*</span>
@@ -680,32 +1334,9 @@ export function PenilaianRisikoPage({
                       </select>
                     </div>
 
-                    {/* 4. Tahun Pelaksanaan */}
-                    <div className="col-span-4 max-md:col-span-1 flex flex-col gap-1">
+                    <div className="col-span-6 max-md:col-span-1 flex flex-col gap-1">
                       <label className="text-[12px] font-bold text-[#536477]">
-                        4. Tahun Pelaksanaan{' '}
-                        <span className="text-[#dc3545]">*</span>
-                      </label>
-                      <select
-                        disabled={!canEdit}
-                        value={ctrl.tahun}
-                        onChange={(e) =>
-                          updateControl(idx, { tahun: e.target.value })
-                        }
-                        className="rounded border border-[#cfd9e4] bg-white px-2.5 py-2 text-[13px] text-[#243247] disabled:bg-[#f4f7fa]"
-                      >
-                        {YEAR_OPTIONS.map((y) => (
-                          <option key={y} value={y}>
-                            {y}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* 5. Periode Pelaksanaan */}
-                    <div className="col-span-4 max-md:col-span-1 flex flex-col gap-1">
-                      <label className="text-[12px] font-bold text-[#536477]">
-                        5. Periode Pelaksanaan{' '}
+                        2. Periode Pelaksanaan{' '}
                         <span className="text-[#dc3545]">*</span>
                       </label>
                       <select
@@ -726,10 +1357,9 @@ export function PenilaianRisikoPage({
                       </select>
                     </div>
 
-                    {/* 2. Bukti Klaim */}
                     <div className="col-span-12 max-md:col-span-1 flex flex-col gap-1">
                       <label className="text-[12px] font-bold text-[#536477]">
-                        2. Bukti Klaim (Tautan URL HTTPS){' '}
+                        3. Bukti Klaim (Tautan URL HTTPS){' '}
                         <span className="text-[#dc3545]">*</span>
                       </label>
                       <div className="flex items-center gap-2">
@@ -759,18 +1389,12 @@ export function PenilaianRisikoPage({
                           </a>
                         )}
                       </div>
-                      {urlInvalid && (
-                        <span className="text-[11px] font-medium text-[#dc3545]">
-                          Format URL tidak valid. Wajib menggunakan tautan HTTPS (contoh:
-                          https://...).
-                        </span>
-                      )}
                     </div>
 
-                    {/* 3. Catatan Klaim */}
                     <div className="col-span-12 max-md:col-span-1 flex flex-col gap-1">
                       <label className="text-[12px] font-bold text-[#536477]">
-                        3. Catatan Klaim <span className="text-[#dc3545]">*</span>
+                        4. Catatan Klaim{' '}
+                        <span className="text-[#dc3545]">*</span>
                       </label>
                       <textarea
                         disabled={!canEdit}
@@ -790,11 +1414,10 @@ export function PenilaianRisikoPage({
         )}
       </section>
 
-      {/* BAGIAN D & E: INHERENT & RESIDUAL (TERPISAH) */}
+      {/* BAGIAN D & E */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-[#dce3eb] bg-[#f8fafc] px-4 py-2.5 text-[12px] text-[#52647a]">
         <span>
-          Kategori tingkat risiko menggunakan <b>Matriks Risiko Terkonfigurasi Administrator</b>{' '}
-          (5 Probabilitas × 4 Dampak).
+          Kategori tingkat risiko menggunakan <b>Matriks Risiko 5×4</b>.
         </span>
         <button
           type="button"
@@ -811,21 +1434,18 @@ export function PenilaianRisikoPage({
       </div>
 
       <div className="grid grid-cols-2 gap-4 max-lg:grid-cols-1">
-        {/* BAGIAN D: PENILAIAN RISIKO INHERENT */}
         <section className="rounded-[7px] border border-[#dce3eb] bg-white p-[18px] shadow-[0_2px_5px_rgba(38,56,75,0.03)]">
           <div className="mb-3 border-b border-[#e9eef4] pb-2.5">
             <h2 className="m-0 text-[15px] font-bold text-[#1d3554]">
               D. Penilaian Risiko Inherent
             </h2>
-            <p className="m-0 mt-0.5 text-[12px] text-[#718096]">
-              Penilaian risiko <b>sebelum</b> memperhitungkan pengendalian yang berjalan.
-            </p>
           </div>
 
           <div className="space-y-3">
             <div className="flex flex-col gap-1">
               <label className="text-[12px] font-bold text-[#536477]">
-                1. Probabilitas Inherent <span className="text-[#dc3545]">*</span>
+                1. Probabilitas Inherent{' '}
+                <span className="text-[#dc3545]">*</span>
               </label>
               <select
                 disabled={!canEdit}
@@ -833,7 +1453,7 @@ export function PenilaianRisikoPage({
                 onChange={(e) =>
                   setInherentProb(e.target.value ? Number(e.target.value) : '')
                 }
-                className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247] disabled:bg-[#f4f7fa]"
+                className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247]"
               >
                 <option value="">-- Pilih Level Probabilitas Inherent --</option>
                 {PROBABILITY_OPTIONS.map((opt) => (
@@ -852,9 +1472,11 @@ export function PenilaianRisikoPage({
                 disabled={!canEdit}
                 value={inherentImpact}
                 onChange={(e) =>
-                  setInherentImpact(e.target.value ? Number(e.target.value) : '')
+                  setInherentImpact(
+                    e.target.value ? Number(e.target.value) : ''
+                  )
                 }
-                className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247] disabled:bg-[#f4f7fa]"
+                className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247]"
               >
                 <option value="">-- Pilih Level Dampak Inherent --</option>
                 {IMPACT_OPTIONS.map((opt) => (
@@ -865,7 +1487,6 @@ export function PenilaianRisikoPage({
               </select>
             </div>
 
-            {/* Hasil Penilaian Inherent Terpisah */}
             <div className="mt-2 rounded-[6px] border border-[#dce3eb] bg-[#f7faff] p-3.5">
               <div className="text-[11px] font-bold uppercase tracking-wide text-[#52647a]">
                 Hasil Penilaian Inherent
@@ -873,8 +1494,7 @@ export function PenilaianRisikoPage({
               {inherentProb !== '' && inherentImpact !== '' ? (
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                   <div className="text-[12px] text-[#243247]">
-                    Probabilitas: <b>Level {inherentProb}</b> · Dampak:{' '}
-                    <b>Level {inherentImpact}</b> · Skor:{' '}
+                    Skor:{' '}
                     <b className="font-mono-num">
                       {Number(inherentProb) * Number(inherentImpact)}
                     </b>
@@ -896,22 +1516,18 @@ export function PenilaianRisikoPage({
           </div>
         </section>
 
-        {/* BAGIAN E: PENILAIAN RISIKO RESIDUAL */}
         <section className="rounded-[7px] border border-[#dce3eb] bg-white p-[18px] shadow-[0_2px_5px_rgba(38,56,75,0.03)]">
           <div className="mb-3 border-b border-[#e9eef4] pb-2.5">
             <h2 className="m-0 text-[15px] font-bold text-[#1d3554]">
               E. Penilaian Risiko Residual
             </h2>
-            <p className="m-0 mt-0.5 text-[12px] text-[#718096]">
-              Penilaian risiko <b>setelah</b> memperhitungkan pengendalian yang
-              berjalan.
-            </p>
           </div>
 
           <div className="space-y-3">
             <div className="flex flex-col gap-1">
               <label className="text-[12px] font-bold text-[#536477]">
-                1. Probabilitas Residual <span className="text-[#dc3545]">*</span>
+                1. Probabilitas Residual{' '}
+                <span className="text-[#dc3545]">*</span>
               </label>
               <select
                 disabled={!canEdit}
@@ -919,7 +1535,7 @@ export function PenilaianRisikoPage({
                 onChange={(e) =>
                   setResidualProb(e.target.value ? Number(e.target.value) : '')
                 }
-                className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247] disabled:bg-[#f4f7fa]"
+                className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247]"
               >
                 <option value="">-- Pilih Level Probabilitas Residual --</option>
                 {PROBABILITY_OPTIONS.map((opt) => (
@@ -938,9 +1554,11 @@ export function PenilaianRisikoPage({
                 disabled={!canEdit}
                 value={residualImpact}
                 onChange={(e) =>
-                  setResidualImpact(e.target.value ? Number(e.target.value) : '')
+                  setResidualImpact(
+                    e.target.value ? Number(e.target.value) : ''
+                  )
                 }
-                className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247] disabled:bg-[#f4f7fa]"
+                className="rounded border border-[#cfd9e4] bg-white px-3 py-2 text-[13px] text-[#243247]"
               >
                 <option value="">-- Pilih Level Dampak Residual --</option>
                 {IMPACT_OPTIONS.map((opt) => (
@@ -951,7 +1569,6 @@ export function PenilaianRisikoPage({
               </select>
             </div>
 
-            {/* Hasil Penilaian Residual Terpisah */}
             <div className="mt-2 rounded-[6px] border border-[#dce3eb] bg-[#f7faff] p-3.5">
               <div className="text-[11px] font-bold uppercase tracking-wide text-[#52647a]">
                 Hasil Penilaian Residual
@@ -959,8 +1576,7 @@ export function PenilaianRisikoPage({
               {residualProb !== '' && residualImpact !== '' ? (
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                   <div className="text-[12px] text-[#243247]">
-                    Probabilitas: <b>Level {residualProb}</b> · Dampak:{' '}
-                    <b>Level {residualImpact}</b> · Skor:{' '}
+                    Skor:{' '}
                     <b className="font-mono-num">
                       {Number(residualProb) * Number(residualImpact)}
                     </b>
@@ -983,7 +1599,6 @@ export function PenilaianRisikoPage({
         </section>
       </div>
 
-      {/* Tombol Akhir Formulir */}
       <div className="flex flex-wrap items-center justify-end gap-2.5 rounded-[7px] border border-[#dce3eb] bg-white px-5 py-4 shadow-[0_2px_5px_rgba(38,56,75,0.03)]">
         <button
           type="button"
@@ -1013,10 +1628,12 @@ export function PenilaianRisikoPage({
         )}
       </div>
 
-      {/* Modals */}
       <RiskLibraryModal
         open={libraryOpen}
-        initialRiskCode={selectedRiskCode || RISK_CONTROL_LIBRARY[0].kodeRisiko}
+        riskCatalog={riskCatalog}
+        initialRiskCode={
+          selectedRiskCode || riskCatalog[0]?.kodeRisiko || 'PPG.RK.01'
+        }
         onClose={() => setLibraryOpen(false)}
         onSelectRisk={canEdit ? handleRiskChange : undefined}
       />

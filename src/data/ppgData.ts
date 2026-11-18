@@ -11,12 +11,16 @@ import {
   PageId,
   PengawasanRegulerItem,
   RiskAssessmentRecord,
+  RiskAssessmentStatus,
   RiskLevelCategory,
   RiskLibraryItem,
   RiskMatrixConfig,
   RiskMatrixGrid,
   UpgLevel,
 } from '../types/upg';
+import { RISK_CONTROL_LIBRARY } from './riskCatalogData';
+
+export { RISK_CONTROL_LIBRARY };
 
 export const PAGE_META: Record<
   PageId,
@@ -183,49 +187,10 @@ export const MASTER_SATKER_LIST: MasterSatker[] = [
   },
 ];
 
-export const RISK_CONTROL_LIBRARY: RiskLibraryItem[] = [
-  {
-    kodeRisiko: 'PPG.RK.1',
-    pernyataanRisiko:
-      'Petugas menerima uang terima kasih atau fasilitas dari pengguna layanan untuk mempercepat layanan.',
-    klasifikasiRisiko: 'Sektor Layanan Publik',
-    prosesSubproses: 'Pelayanan Publik',
-    faktorPenyebab: 'Sistem',
-    penyebabRisiko: [
-      'Tarif resmi dan alur PTSP kurang terlihat.',
-      'Interaksi di luar kanal resmi tidak tercatat.',
-    ],
-    dampakRisiko: [
-      'Kesetaraan layanan, integritas aparatur, dan kepercayaan publik terganggu.',
-    ],
-    mandatoryControls: ['Pembentukan Tim UPG'],
-  },
-  {
-    kodeRisiko: 'PPG.RK.2',
-    pernyataanRisiko:
-      'Pihak berperkara menitipkan bingkisan hari raya kepada hakim atau aparatur yang menangani perkara.',
-    klasifikasiRisiko: 'Sektor Layanan Publik',
-    prosesSubproses: 'Penanganan Perkara',
-    faktorPenyebab: 'Individu dan lingkungan kerja',
-    penyebabRisiko: [
-      'Adanya kedekatan atau hubungan personal antara pihak berperkara dengan hakim atau aparatur.',
-      'Kurangnya pemahaman dan kepatuhan terhadap ketentuan gratifikasi.',
-      'Belum optimalnya pelaporan dan pengendalian penerimaan bingkisan.',
-    ],
-    dampakRisiko: [
-      'Independensi dan objektivitas penanganan perkara terganggu.',
-      'Integritas hakim dan aparatur peradilan dipertanyakan.',
-      'Menurunnya kepercayaan masyarakat terhadap lembaga peradilan.',
-    ],
-    mandatoryControls: [
-      'Pembentukan Tim UPG',
-      'Penyusunan Pedoman Internal dan SOP',
-    ],
-  },
-];
+export const BADAN_PENGAWASAN_SATKER: MasterSatker = MASTER_SATKER_LIST[0];
 
 export const PROBABILITY_OPTIONS = [
-  { value: 1, label: 'Level 1 – Hampir Terjadi' },
+  { value: 1, label: 'Level 1 – Sangat Jarang Terjadi' },
   { value: 2, label: 'Level 2 – Jarang Terjadi' },
   { value: 3, label: 'Level 3 – Kadang Terjadi' },
   { value: 4, label: 'Level 4 – Sering Terjadi' },
@@ -239,33 +204,42 @@ export const IMPACT_OPTIONS = [
   { value: 4, label: 'Level 4 – Signifikan' },
 ] as const;
 
+export function normalizeRiskCategory(raw: unknown): RiskLevelCategory {
+  if (raw === 'Rendah') return 'Rendah';
+  if (raw === 'Sedang') return 'Sedang';
+  if (raw === 'Tinggi') return 'Tinggi';
+  if (raw === 'Ekstrem' || raw === 'Sangat Tinggi') return 'Ekstrem';
+  return 'Sedang';
+}
+
 export function createDefaultRiskMatrix(): RiskMatrixConfig {
   const grid: RiskMatrixGrid = {
-    // Default configurable 5 (Probabilitas) x 4 (Dampak) matrix
+    // 5 (Probabilitas) x 4 (Dampak):
+    // 1–4 Rendah | 5–9 Sedang | 10–12 Tinggi | 15–20 Ekstrem
     '1-1': 'Rendah',
     '1-2': 'Rendah',
-    '1-3': 'Sedang',
-    '1-4': 'Tinggi',
+    '1-3': 'Rendah',
+    '1-4': 'Rendah',
     '2-1': 'Rendah',
-    '2-2': 'Sedang',
+    '2-2': 'Rendah',
     '2-3': 'Sedang',
-    '2-4': 'Tinggi',
-    '3-1': 'Sedang',
+    '2-4': 'Sedang',
+    '3-1': 'Rendah',
     '3-2': 'Sedang',
-    '3-3': 'Tinggi',
-    '3-4': 'Sangat Tinggi',
-    '4-1': 'Sedang',
-    '4-2': 'Tinggi',
+    '3-3': 'Sedang',
+    '3-4': 'Tinggi',
+    '4-1': 'Rendah',
+    '4-2': 'Sedang',
     '4-3': 'Tinggi',
-    '4-4': 'Sangat Tinggi',
-    '5-1': 'Tinggi',
+    '4-4': 'Ekstrem',
+    '5-1': 'Sedang',
     '5-2': 'Tinggi',
-    '5-3': 'Sangat Tinggi',
-    '5-4': 'Sangat Tinggi',
+    '5-3': 'Ekstrem',
+    '5-4': 'Ekstrem',
   };
   return {
     updatedAt: '',
-    note: 'Matriks dapat dikonfigurasi administrator sesuai ketentuan SK yang berlaku.',
+    note: 'Matriks 5×4: Skor 1–4 (Rendah), 5–9 (Sedang), 10–12 (Tinggi), 15–20 (Ekstrem).',
     grid,
   };
 }
@@ -276,7 +250,13 @@ export function getMatrixRiskCategory(
   impact: number | ''
 ): RiskLevelCategory | null {
   if (prob === '' || impact === '') return null;
-  return matrix.grid[`${prob}-${impact}`] ?? 'Sedang';
+  const raw = matrix.grid[`${prob}-${impact}`];
+  if (raw) return normalizeRiskCategory(raw);
+  const score = Number(prob) * Number(impact);
+  if (score <= 4) return 'Rendah';
+  if (score <= 9) return 'Sedang';
+  if (score <= 12) return 'Tinggi';
+  return 'Ekstrem';
 }
 
 export function isValidHttpsUrl(value: string): boolean {
@@ -290,21 +270,232 @@ export function isValidHttpsUrl(value: string): boolean {
   }
 }
 
-export function isRiskAssessmentComplete(record: RiskAssessmentRecord): boolean {
-  if (!record.satkerUniqueId || !record.kodeRisiko) return false;
-  if (record.inherentProb === '' || record.inherentImpact === '') return false;
-  if (record.residualProb === '' || record.residualImpact === '') return false;
-  if (!record.controls || record.controls.length === 0) return false;
-
-  return record.controls.every(
-    (ctrl) =>
-      ctrl.klaimEfektivitas !== 'Belum Dinilai' &&
-      isValidHttpsUrl(ctrl.buktiKlaim) &&
-      ctrl.catatanKlaim.trim().length > 0 &&
-      ctrl.tahun.trim().length > 0 &&
-      ctrl.periode.trim().length > 0
+export function isControlEntryComplete(ctrl: {
+  klaimEfektivitas: string;
+  buktiKlaim: string;
+  catatanKlaim: string;
+  periode: string;
+}): boolean {
+  return (
+    ctrl.klaimEfektivitas !== 'Belum Dinilai' &&
+    isValidHttpsUrl(ctrl.buktiKlaim) &&
+    ctrl.catatanKlaim.trim().length > 0 &&
+    ctrl.periode.trim().length > 0
   );
 }
+
+export function isControlEntryTouched(ctrl: {
+  klaimEfektivitas: string;
+  buktiKlaim: string;
+  catatanKlaim: string;
+}): boolean {
+  return (
+    ctrl.klaimEfektivitas !== 'Belum Dinilai' ||
+    ctrl.buktiKlaim.trim().length > 0 ||
+    ctrl.catatanKlaim.trim().length > 0
+  );
+}
+
+export function getRiskAssessmentStatus(
+  record: RiskAssessmentRecord
+): RiskAssessmentStatus {
+  const mandatoryList = record.controls ?? [];
+  const nonMandatoryList = record.nonMandatoryControls ?? [];
+
+  const allMandatoryComplete =
+    mandatoryList.length > 0 && mandatoryList.every(isControlEntryComplete);
+  const scoresComplete =
+    record.inherentProb !== '' &&
+    record.inherentImpact !== '' &&
+    record.residualProb !== '' &&
+    record.residualImpact !== '';
+
+  if (record.savedAsDraft) {
+    return 'Draft';
+  }
+
+  if (allMandatoryComplete && scoresComplete) {
+    return 'Selesai';
+  }
+
+  const anyMandatoryTouched = mandatoryList.some(isControlEntryTouched);
+  const anyNonMandatoryTouched = nonMandatoryList.some(isControlEntryTouched);
+  const anyScoreSelected =
+    record.inherentProb !== '' ||
+    record.inherentImpact !== '' ||
+    record.residualProb !== '' ||
+    record.residualImpact !== '';
+
+  if (anyMandatoryTouched || anyNonMandatoryTouched || anyScoreSelected) {
+    return 'Draft';
+  }
+
+  return 'Belum Dinilai';
+}
+
+export function getNextRiskCode(catalog: RiskLibraryItem[]): string {
+  let maxNum = 0;
+  catalog.forEach((item) => {
+    const match = item.kodeRisiko.match(/(\d+)$/);
+    if (match) {
+      const num = Number.parseInt(match[1], 10);
+      if (!Number.isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    }
+  });
+  const nextNum = maxNum + 1;
+  return `PPG.RK.${String(nextNum).padStart(2, '0')}`;
+}
+
+export function isRiskAssessmentComplete(record: RiskAssessmentRecord): boolean {
+  if (!record.satkerUniqueId || !record.kodeRisiko) return false;
+  return getRiskAssessmentStatus(record) === 'Selesai';
+}
+
+export function createEmptyAssessmentForRisk(
+  satker: MasterSatker,
+  risk: RiskLibraryItem,
+  year: string
+): RiskAssessmentRecord {
+  return {
+    id: `${satker.uniqueId}::${risk.kodeRisiko}`,
+    satkerUniqueId: satker.uniqueId,
+    upgLevel: satker.upgLevel,
+    kodeSatker: satker.kodeSatker,
+    namaSatker: satker.namaSatker,
+    tahun: year,
+    kodeRisiko: risk.kodeRisiko,
+    prosesSubproses: risk.prosesSubproses,
+    pernyataanRisiko: risk.pernyataanRisiko,
+    controls: risk.mandatoryControls.map((ctrlName) => ({
+      controlName: ctrlName,
+      klaimEfektivitas: 'Belum Dinilai',
+      buktiKlaim: '',
+      catatanKlaim: '',
+      tahun: year,
+      periode: 'Triwulan I',
+    })),
+    nonMandatoryControls: risk.nonMandatoryControls.map((ctrlName) => ({
+      controlName: ctrlName,
+      klaimEfektivitas: 'Belum Dinilai',
+      buktiKlaim: '',
+      catatanKlaim: '',
+      tahun: year,
+      periode: 'Triwulan I',
+    })),
+    inherentProb: '',
+    inherentImpact: '',
+    residualProb: '',
+    residualImpact: '',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export const INITIAL_BADAN_PENGAWASAN_ASSESSMENTS: RiskAssessmentRecord[] = [
+  {
+    id: `${BADAN_PENGAWASAN_SATKER.uniqueId}::PPG.RK.01`,
+    satkerUniqueId: BADAN_PENGAWASAN_SATKER.uniqueId,
+    upgLevel: BADAN_PENGAWASAN_SATKER.upgLevel,
+    kodeSatker: BADAN_PENGAWASAN_SATKER.kodeSatker,
+    namaSatker: BADAN_PENGAWASAN_SATKER.namaSatker,
+    tahun: '2026',
+    kodeRisiko: RISK_CONTROL_LIBRARY[0].kodeRisiko,
+    prosesSubproses: RISK_CONTROL_LIBRARY[0].prosesSubproses,
+    pernyataanRisiko: RISK_CONTROL_LIBRARY[0].pernyataanRisiko,
+    controls: [
+      {
+        controlName: RISK_CONTROL_LIBRARY[0].mandatoryControls[0],
+        klaimEfektivitas: 'Efektif',
+        buktiKlaim: 'https://wastitama.mahkamahagung.go.id/dokumen/sk-tim-upg-bawas-2026',
+        catatanKlaim:
+          'SK Tim UPG Badan Pengawasan telah ditetapkan dan petugas pengawas layanan aktif bertugas.',
+        tahun: '2026',
+        periode: 'Triwulan I',
+      },
+      {
+        controlName: RISK_CONTROL_LIBRARY[0].mandatoryControls[1],
+        klaimEfektivitas: 'Efektif',
+        buktiKlaim: 'https://wastitama.mahkamahagung.go.id/dokumen/maklumat-ptsp-bawas',
+        catatanKlaim:
+          'Maklumat pelayanan, tarif PNBP resmi, dan pakta integritas telah terpasang di meja PTSP.',
+        tahun: '2026',
+        periode: 'Triwulan I',
+      },
+    ],
+    nonMandatoryControls: [
+      {
+        controlName: RISK_CONTROL_LIBRARY[0].nonMandatoryControls[0],
+        klaimEfektivitas: 'Efektif',
+        buktiKlaim: 'https://wastitama.mahkamahagung.go.id/dokumen/briefing-ptsp-tw1',
+        catatanKlaim: 'Briefing integritas petugas dilaksanakan rutin setiap hari Senin.',
+        tahun: '2026',
+        periode: 'Triwulan I',
+      },
+      {
+        controlName: RISK_CONTROL_LIBRARY[0].nonMandatoryControls[1],
+        klaimEfektivitas: 'Belum Dinilai',
+        buktiKlaim: '',
+        catatanKlaim: '',
+        tahun: '2026',
+        periode: 'Triwulan I',
+      },
+    ],
+    inherentProb: 4,
+    inherentImpact: 3,
+    residualProb: 2,
+    residualImpact: 2,
+    updatedAt: '2026-03-15T09:00:00.000Z',
+  },
+  {
+    id: `${BADAN_PENGAWASAN_SATKER.uniqueId}::PPG.RK.03`,
+    satkerUniqueId: BADAN_PENGAWASAN_SATKER.uniqueId,
+    upgLevel: BADAN_PENGAWASAN_SATKER.upgLevel,
+    kodeSatker: BADAN_PENGAWASAN_SATKER.kodeSatker,
+    namaSatker: BADAN_PENGAWASAN_SATKER.namaSatker,
+    tahun: '2026',
+    kodeRisiko: RISK_CONTROL_LIBRARY[2].kodeRisiko,
+    prosesSubproses: RISK_CONTROL_LIBRARY[2].prosesSubproses,
+    pernyataanRisiko: RISK_CONTROL_LIBRARY[2].pernyataanRisiko,
+    controls: [
+      {
+        controlName: RISK_CONTROL_LIBRARY[2].mandatoryControls[0],
+        klaimEfektivitas: 'Efektif Sebagian',
+        buktiKlaim: 'https://wastitama.mahkamahagung.go.id/dokumen/pakta-integritas-pemeriksa',
+        catatanKlaim:
+          'Pakta integritas telah ditandatangani oleh sebagian besar tim pemeriksa wilayah.',
+        tahun: '2026',
+        periode: 'Triwulan I',
+      },
+      {
+        controlName: RISK_CONTROL_LIBRARY[2].mandatoryControls[1],
+        klaimEfektivitas: 'Belum Dinilai',
+        buktiKlaim: '',
+        catatanKlaim: '',
+        tahun: '2026',
+        periode: 'Triwulan I',
+      },
+    ],
+    nonMandatoryControls: RISK_CONTROL_LIBRARY[2].nonMandatoryControls.map((ctrlName) => ({
+      controlName: ctrlName,
+      klaimEfektivitas: 'Belum Dinilai',
+      buktiKlaim: '',
+      catatanKlaim: '',
+      tahun: '2026',
+      periode: 'Triwulan I',
+    })),
+    inherentProb: 3,
+    inherentImpact: 3,
+    residualProb: '',
+    residualImpact: '',
+    updatedAt: '2026-03-18T10:30:00.000Z',
+  },
+  createEmptyAssessmentForRisk(
+    BADAN_PENGAWASAN_SATKER,
+    RISK_CONTROL_LIBRARY[4],
+    '2026'
+  ),
+];
 
 // Program & Kegiatan sesuai gambar Matriks Evaluasi Tahunan & Matriks Monitoring Triwulanan
 export const MONEV_ACTIVITIES: MonevActivityItem[] = [
