@@ -6,9 +6,10 @@ export type PageId =
   | 'ppg-monev';
 
 export type UserRole =
-  | 'Evaluator (UPG Tingkat 2)'
-  | 'Evaluator (UPG Pusat)'
-  | 'Evaluatan (satker)';
+  | 'UPG Tingkat 1'
+  | 'UPG Tingkat 2'
+  | 'UPG Pusat'
+  | 'Satker';
 
 export type UpgLevel = 'UPG Tingkat 1' | 'UPG Tingkat 2' | 'UPG Tingkat 3';
 

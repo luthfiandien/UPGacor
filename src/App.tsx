@@ -14,7 +14,6 @@ import {
   createDefaultRiskMatrix,
   INITIAL_AUDIT_KINERJA,
   INITIAL_PENGAWASAN_REGULER,
-  MASTER_SATKER_LIST,
   PAGE_META,
 } from './data/ppgData';
 import {
@@ -33,7 +32,6 @@ const STORAGE_KEY = 'wastitama_ppg_integrated_state_v2';
 interface PersistedState {
   year: string;
   userRole: UserRole;
-  activeSatkerId: string;
   assessments: RiskAssessmentRecord[];
   riskMatrix: RiskMatrixConfig;
   monevRecords: Record<string, MonevSatkerRecord>;
@@ -42,31 +40,18 @@ interface PersistedState {
   auditKinerja: AuditKinerjaItem[];
 }
 
-const DEFAULT_SATKER_ID =
-  MASTER_SATKER_LIST.find((s) => s.upgLevel === 'UPG Tingkat 3')?.uniqueId ??
-  MASTER_SATKER_LIST[0].uniqueId;
-
 function normalizeUserRole(raw: unknown): UserRole {
-  if (
-    raw === 'Evaluator (UPG Pusat)' ||
-    raw === 'UPG Pusat' ||
-    raw === 'PPG Pusat'
-  )
-    return 'Evaluator (UPG Pusat)';
-  if (
-    raw === 'Evaluatan (satker)' ||
-    raw === 'Satker' ||
-    raw === 'Pemantau (Read-Only)'
-  )
-    return 'Evaluatan (satker)';
-  return 'Evaluator (UPG Tingkat 2)';
+  if (raw === 'UPG Tingkat 1' || raw === 'UPG Tingkat I')
+    return 'UPG Tingkat 1';
+  if (raw === 'UPG Pusat' || raw === 'PPG Pusat') return 'UPG Pusat';
+  if (raw === 'Satker' || raw === 'Pemantau (Read-Only)') return 'Satker';
+  return 'UPG Tingkat 2';
 }
 
 function loadInitialState(): PersistedState {
   const fallback: PersistedState = {
     year: '2026',
-    userRole: 'Evaluator (UPG Tingkat 2)',
-    activeSatkerId: DEFAULT_SATKER_ID,
+    userRole: 'UPG Tingkat 2',
     assessments: [],
     riskMatrix: createDefaultRiskMatrix(),
     monevRecords: {},
@@ -79,15 +64,9 @@ function loadInitialState(): PersistedState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw) as Partial<PersistedState>;
-    const validSatkerId = MASTER_SATKER_LIST.some(
-      (s) => s.uniqueId === parsed.activeSatkerId
-    )
-      ? (parsed.activeSatkerId as string)
-      : fallback.activeSatkerId;
     return {
       year: parsed.year || '2026',
       userRole: normalizeUserRole(parsed.userRole),
-      activeSatkerId: validSatkerId,
       assessments: Array.isArray(parsed.assessments) ? parsed.assessments : [],
       riskMatrix: parsed.riskMatrix?.grid
         ? parsed.riskMatrix
@@ -109,10 +88,9 @@ function loadInitialState(): PersistedState {
 export default function App() {
   const [initial] = useState<PersistedState>(() => loadInitialState());
   const [userRole, setUserRole] = useState<UserRole>(initial.userRole);
-  const [activeSatkerId, setActiveSatkerId] = useState<string>(
-    initial.activeSatkerId
+  const [activePage, setActivePage] = useState<PageId>(() =>
+    initial.userRole === 'Satker' ? 'ppg-risiko' : 'ppg-dashboard'
   );
-  const [activePage, setActivePage] = useState<PageId>('ppg-dashboard');
   const [year, setYear] = useState<string>(initial.year);
   const [assessments, setAssessments] = useState<RiskAssessmentRecord[]>(
     initial.assessments
@@ -144,7 +122,6 @@ export default function App() {
       const payload: PersistedState = {
         year,
         userRole,
-        activeSatkerId,
         assessments,
         riskMatrix,
         monevRecords,
@@ -159,7 +136,6 @@ export default function App() {
   }, [
     year,
     userRole,
-    activeSatkerId,
     assessments,
     riskMatrix,
     monevRecords,
@@ -207,19 +183,26 @@ export default function App() {
   };
 
   const canViewEvaluatorPages =
-    userRole === 'Evaluator (UPG Tingkat 2)' ||
-    userRole === 'Evaluator (UPG Pusat)';
+    userRole === 'UPG Tingkat 1' ||
+    userRole === 'UPG Tingkat 2' ||
+    userRole === 'UPG Pusat';
 
   const handleRoleChange = (nextRole: UserRole) => {
     setUserRole(nextRole);
-    if (nextRole === 'Evaluatan (satker)' && activePage === 'ppg-monev') {
-      setActivePage('ppg-dashboard');
+    if (
+      nextRole === 'Satker' &&
+      (activePage === 'ppg-dashboard' || activePage === 'ppg-monev')
+    ) {
+      setActivePage('ppg-risiko');
     }
   };
 
   const handleNavigate = (page: PageId) => {
-    if (!canViewEvaluatorPages && page === 'ppg-monev') {
-      setActivePage('ppg-dashboard');
+    if (
+      !canViewEvaluatorPages &&
+      (page === 'ppg-dashboard' || page === 'ppg-monev')
+    ) {
+      setActivePage('ppg-risiko');
       return;
     }
     if (page !== 'ppg-risiko') {
@@ -237,17 +220,14 @@ export default function App() {
   };
 
   const handleOpenNewRiskForm = () => {
-    setRiskEditTarget(
-      userRole === 'Evaluatan (satker)'
-        ? { satkerUniqueId: activeSatkerId }
-        : null
-    );
+    setRiskEditTarget(null);
     setActivePage('ppg-risiko');
   };
 
   const effectivePage: PageId =
-    !canViewEvaluatorPages && activePage === 'ppg-monev'
-      ? 'ppg-dashboard'
+    !canViewEvaluatorPages &&
+    (activePage === 'ppg-dashboard' || activePage === 'ppg-monev')
+      ? 'ppg-risiko'
       : activePage;
 
   const meta = PAGE_META[effectivePage];
@@ -256,22 +236,22 @@ export default function App() {
     effectivePage === 'ppg-dashboard' ||
     effectivePage === 'ppg-monev';
 
-  const activeSatkerObj =
-    MASTER_SATKER_LIST.find((s) => s.uniqueId === activeSatkerId) ??
-    MASTER_SATKER_LIST[0];
-
   const roleBadgeInitial =
-    userRole === 'Evaluator (UPG Tingkat 2)'
-      ? 'T2'
-      : userRole === 'Evaluator (UPG Pusat)'
-        ? 'U'
-        : 'S';
+    userRole === 'UPG Tingkat 1'
+      ? 'T1'
+      : userRole === 'UPG Tingkat 2'
+        ? 'T2'
+        : userRole === 'UPG Pusat'
+          ? 'U'
+          : 'S';
   const roleSubtitle =
-    userRole === 'Evaluator (UPG Tingkat 2)'
-      ? 'Evaluator UPG Tingkat 3'
-      : userRole === 'Evaluator (UPG Pusat)'
-        ? 'Monitoring & Monev UPG Pusat'
-        : activeSatkerObj.namaSatker;
+    userRole === 'UPG Tingkat 1'
+      ? 'Evaluator UPG Tingkat 2 & 3'
+      : userRole === 'UPG Tingkat 2'
+        ? 'Evaluator UPG Tingkat 3'
+        : userRole === 'UPG Pusat'
+          ? 'Monitoring & Monev UPG Pusat'
+          : 'Input Penilaian Risiko Satker';
 
   return (
     <div className="flex min-h-screen max-md:block">
@@ -298,36 +278,12 @@ export default function App() {
                 aria-label="Pilih peran akses pengguna"
                 className="rounded border border-[#cfd9e4] bg-[#f8fafc] px-2.5 py-1 text-[12px] font-semibold text-[#243247]"
               >
-                <option value="Evaluator (UPG Tingkat 2)">
-                  Evaluator (UPG Tingkat 2)
-                </option>
-                <option value="Evaluator (UPG Pusat)">
-                  Evaluator (UPG Pusat)
-                </option>
-                <option value="Evaluatan (satker)">Evaluatan (satker)</option>
+                <option value="UPG Tingkat 1">UPG Tingkat 1</option>
+                <option value="UPG Tingkat 2">UPG Tingkat 2</option>
+                <option value="UPG Pusat">UPG Pusat</option>
+                <option value="Satker">Satker</option>
               </select>
             </label>
-
-            {userRole === 'Evaluatan (satker)' && (
-              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-[#52647a]">
-                Satker Login:
-                <select
-                  value={activeSatkerId}
-                  onChange={(e) => {
-                    setActiveSatkerId(e.target.value);
-                    setRiskEditTarget(null);
-                  }}
-                  aria-label="Pilih akun satker aktif"
-                  className="max-w-[230px] rounded border border-[#cfd9e4] bg-[#f8fafc] px-2.5 py-1 text-[12px] font-semibold text-[#243247]"
-                >
-                  {MASTER_SATKER_LIST.map((sat) => (
-                    <option key={sat.uniqueId} value={sat.uniqueId}>
-                      [{sat.upgLevel}] {sat.namaSatker}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
 
             <div className="flex items-center gap-2.5 font-bold">
               <div className="grid h-[34px] w-[34px] place-items-center rounded-full bg-[#e7f0fc] text-[14px] font-bold text-[#1762b5]">
@@ -386,7 +342,6 @@ export default function App() {
             <PenilaianRisikoPage
               year={year}
               userRole={userRole}
-              activeSatkerId={activeSatkerId}
               assessments={assessments}
               riskMatrix={riskMatrix}
               initialSatkerUniqueId={riskEditTarget?.satkerUniqueId}
@@ -400,7 +355,6 @@ export default function App() {
           {effectivePage === 'ppg-dashboard' && (
             <DashboardPPGPage
               userRole={userRole}
-              activeSatkerId={activeSatkerId}
               assessments={assessments}
               riskMatrix={riskMatrix}
               onOpenRiskFormForSatker={handleOpenRiskFormForSatker}
