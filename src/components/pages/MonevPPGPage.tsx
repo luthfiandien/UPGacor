@@ -66,21 +66,18 @@ export function MonevPPGPage({
   onSaveAnnualRecord,
 }: MonevPPGPageProps) {
   const canAccess =
-    userRole === 'UPG Tingkat 1' ||
-    userRole === 'UPG Tingkat 2' ||
-    userRole === 'UPG Pusat';
+    userRole === 'Evaluator (UPG Tingkat 2)' ||
+    userRole === 'Evaluator (UPG Pusat)';
   const canEdit = canAccess;
   const allowedUpgLevels: UpgLevel[] =
-    userRole === 'UPG Tingkat 2'
+    userRole === 'Evaluator (UPG Tingkat 2)'
       ? ['UPG Tingkat 3']
-      : userRole === 'UPG Tingkat 1'
-        ? ['UPG Tingkat 2', 'UPG Tingkat 3']
-        : UPG_LEVELS;
+      : UPG_LEVELS;
   const isSingleLevelLocked = allowedUpgLevels.length === 1;
 
   const [activeTab, setActiveTab] = useState<MonevViewTab>('tahunan');
   const [selectedUpg, setSelectedUpg] = useState<UpgLevel>(() =>
-    userRole === 'UPG Tingkat 2' ? 'UPG Tingkat 3' : 'UPG Tingkat 2'
+    userRole === 'Evaluator (UPG Tingkat 2)' ? 'UPG Tingkat 3' : 'UPG Tingkat 2'
   );
   const effectiveUpg: UpgLevel = allowedUpgLevels.includes(selectedUpg)
     ? selectedUpg
@@ -94,11 +91,9 @@ export function MonevPPGPage({
 
   useEffect(() => {
     const scopeLevels: UpgLevel[] =
-      userRole === 'UPG Tingkat 2'
+      userRole === 'Evaluator (UPG Tingkat 2)'
         ? ['UPG Tingkat 3']
-        : userRole === 'UPG Tingkat 1'
-          ? ['UPG Tingkat 2', 'UPG Tingkat 3']
-          : UPG_LEVELS;
+        : UPG_LEVELS;
 
     if (!scopeLevels.includes(selectedUpg)) {
       const nextUpg = scopeLevels[0];
@@ -352,9 +347,9 @@ export function MonevPPGPage({
       <div className="rounded-[7px] border border-[#f5c2c7] bg-[#fde8e8] p-6 text-center text-[#9b1c24]">
         <h2 className="m-0 text-[16px] font-bold">Akses Dibatasi</h2>
         <p className="mt-1.5 mb-0 text-[13px]">
-          Halaman <b>Monev PPG</b> hanya dapat dilihat oleh <b>UPG Tingkat 1</b>,{' '}
-          <b>UPG Tingkat 2</b>, atau <b>UPG Pusat</b>. Satker tidak memiliki
-          akses ke halaman ini.
+          Halaman <b>Monev PPG</b> hanya dapat dilihat oleh{' '}
+          <b>Evaluator (UPG Tingkat 2)</b> atau <b>Evaluator (UPG Pusat)</b>.
+          Evaluatan (satker) tidak memiliki akses ke halaman ini.
         </p>
       </div>
     );
