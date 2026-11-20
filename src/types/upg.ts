@@ -219,3 +219,30 @@ export interface SatkerEvalScore {
   evaluatorScore: number | null;
 }
 
+export type MonevVerificationStatus =
+  | 'Menunggu Uji'
+  | 'Perlu Revisi'
+  | 'Terverifikasi'
+  | 'Belum Lapor';
+
+export type EvaluatorStepScore = 0 | 25 | 50 | 75 | 100;
+
+export interface MonevPusatIndicatorEntry {
+  mandiriScore: number | null;
+  evaluatorScore: EvaluatorStepScore | null;
+  buktiUrl: string;
+  catatanPusat: string;
+}
+
+export interface MonevPusatSatkerRecord {
+  key: string; // `${year}::${satkerUniqueId}`
+  year: string;
+  satkerUniqueId: string;
+  status: MonevVerificationStatus;
+  revisionNote: string;
+  entries: Record<string, MonevPusatIndicatorEntry>;
+  quarters: Record<string, MonevQuarters>;
+  updatedAt: string;
+}
+
+

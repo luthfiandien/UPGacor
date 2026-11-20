@@ -1,12 +1,19 @@
 import {
   ControlEffectivenessClaim,
+  EvaluatorStepScore,
   MandatoryControlDefinition,
   MandatoryProgramGroup,
   MasterSatker,
+  MonevPusatIndicatorEntry,
+  MonevPusatSatkerRecord,
+  MonevQuarters,
+  MonevQuarterStatus,
+  MonevVerificationStatus,
   QuarterPeriod,
   RiskAssessmentRecord,
   SatkerEvalScore,
   SatkerMandatoryEvidence,
+  UpgLevel,
 } from '../types/upg';
 import { RISK_CONTROL_LIBRARY } from './riskCatalogData';
 
@@ -543,3 +550,253 @@ export function buildInitialTierSampleAssessments(
 
   return rows;
 }
+
+export const MANDATORY_CONTROL_WEIGHTS: Record<string, number> = {
+  '1.1': 5,
+  '1.2': 5,
+  '2.1.1': 5,
+  '2.1.2': 5,
+  '2.1.3': 4,
+  '2.2.1': 6,
+  '3.1.1': 3,
+  '3.1.2': 3,
+  '3.1.3': 3,
+  '3.1.4': 3,
+  '3.1.5': 3,
+  '3.1.6': 3,
+  '3.1.7': 3,
+  '3.1.8': 3,
+  '3.2.1': 3,
+  '3.2.2': 3,
+  '3.2.3': 3,
+  '3.2.4': 3,
+  '3.2.5': 3,
+  '3.2.6': 3,
+  '3.2.7': 3,
+  '3.3': 5,
+  '6.1': 15,
+  '7.2': 5,
+};
+
+export function computeMonevPusatTotals(
+  entries: Record<string, MonevPusatIndicatorEntry>,
+  upgLevel: UpgLevel
+): {
+  mandiriPct: number | null;
+  evaluatorPct: number | null;
+  totalApplicableWeight: number;
+} {
+  let applicableWeight = 0;
+  let mandiriWeightedSum = 0;
+  let evaluatorWeightedSum = 0;
+  let hasMandiri = false;
+  let hasEvaluator = false;
+
+  MANDATORY_CONTROLS_CATALOG.forEach((ctrl) => {
+    if (ctrl.courtOnly && upgLevel === 'UPG Tingkat 1') return;
+    const weight = MANDATORY_CONTROL_WEIGHTS[ctrl.code] ?? 0;
+    applicableWeight += weight;
+
+    const entry = entries[ctrl.code];
+    if (entry?.mandiriScore !== null && entry?.mandiriScore !== undefined) {
+      hasMandiri = true;
+      mandiriWeightedSum += (entry.mandiriScore / 100) * weight;
+    }
+    if (entry?.evaluatorScore !== null && entry?.evaluatorScore !== undefined) {
+      hasEvaluator = true;
+      evaluatorWeightedSum += (entry.evaluatorScore / 100) * weight;
+    }
+  });
+
+  if (applicableWeight === 0) {
+    return {
+      mandiriPct: null,
+      evaluatorPct: null,
+      totalApplicableWeight: 0,
+    };
+  }
+
+  return {
+    mandiriPct: hasMandiri
+      ? Number(((mandiriWeightedSum / applicableWeight) * 100).toFixed(1))
+      : null,
+    evaluatorPct: hasEvaluator
+      ? Number(((evaluatorWeightedSum / applicableWeight) * 100).toFixed(1))
+      : null,
+    totalApplicableWeight: applicableWeight,
+  };
+}
+
+const INITIAL_MONEV_STATUS_MAP: Record<string, MonevVerificationStatus> = {
+  // Tier 1 (6): 2 Terverifikasi, 2 Menunggu Uji, 1 Perlu Revisi, 1 Belum Lapor
+  'UPG Tingkat 1::1': 'Terverifikasi',
+  'UPG Tingkat 1::2': 'Terverifikasi',
+  'UPG Tingkat 1::3': 'Menunggu Uji',
+  'UPG Tingkat 1::4': 'Menunggu Uji',
+  'UPG Tingkat 1::5': 'Perlu Revisi',
+  'UPG Tingkat 1::6': 'Belum Lapor',
+
+  // Tier 2 (6): 1 Terverifikasi, 3 Menunggu Uji, 1 Perlu Revisi, 1 Belum Lapor
+  'UPG Tingkat 2::1': 'Perlu Revisi',
+  'UPG Tingkat 2::2': 'Menunggu Uji',
+  'UPG Tingkat 2::3': 'Menunggu Uji',
+  'UPG Tingkat 2::4': 'Terverifikasi',
+  'UPG Tingkat 2::5': 'Menunggu Uji',
+  'UPG Tingkat 2::6': 'Belum Lapor',
+
+  // Tier 3 (7): Monitored Read-Only by UPG Pusat
+  'UPG Tingkat 3::1': 'Terverifikasi',
+  'UPG Tingkat 3::2': 'Terverifikasi',
+  'UPG Tingkat 3::3': 'Terverifikasi',
+  'UPG Tingkat 3::4': 'Menunggu Uji',
+  'UPG Tingkat 3::5': 'Perlu Revisi',
+  'UPG Tingkat 3::6': 'Menunggu Uji',
+  'UPG Tingkat 3::7': 'Belum Lapor',
+};
+
+function buildQuarterTuple(
+  status: MonevVerificationStatus,
+  isFilled: boolean,
+  seed: number
+): MonevQuarters {
+  if (status === 'Belum Lapor') {
+    return ['Belum Dimulai', 'Belum Dimulai', 'Belum Dimulai', 'Belum Dimulai'];
+  }
+  if (!isFilled) {
+    return [
+      seed % 2 === 0 ? 'Dalam Proses' : 'Belum Dimulai',
+      'Belum Dimulai',
+      'Belum Dimulai',
+      '—',
+    ];
+  }
+  if (status === 'Terverifikasi') {
+    const q3: MonevQuarterStatus = seed % 5 === 0 ? 'Dalam Proses' : 'Selesai';
+    const q4: MonevQuarterStatus = seed % 3 === 0 ? '—' : 'Dalam Proses';
+    return ['Selesai', 'Selesai', q3, q4];
+  }
+  if (status === 'Perlu Revisi') {
+    const q2: MonevQuarterStatus = seed % 3 === 0 ? 'Terkendala' : 'Dalam Proses';
+    return ['Selesai', q2, 'Dalam Proses', '—'];
+  }
+  // Menunggu Uji
+  const q2: MonevQuarterStatus = seed % 4 === 0 ? 'Dalam Proses' : 'Selesai';
+  return ['Selesai', q2, 'Dalam Proses', 'Belum Dimulai'];
+}
+
+export function buildInitialMonevPusatRecords(
+  year: string,
+  satkerList: MasterSatker[],
+  mandatoryEvidences: SatkerMandatoryEvidence[]
+): Record<string, MonevPusatSatkerRecord> {
+  const evMap = new Map<string, SatkerMandatoryEvidence>();
+  mandatoryEvidences.forEach((ev) => {
+    evMap.set(`${ev.satkerUniqueId}::${ev.controlCode}`, ev);
+  });
+
+  const records: Record<string, MonevPusatSatkerRecord> = {};
+
+  satkerList.forEach((satker, sIdx) => {
+    const status = INITIAL_MONEV_STATUS_MAP[satker.uniqueId] ?? 'Menunggu Uji';
+    const entries: Record<string, MonevPusatIndicatorEntry> = {};
+    const quarters: Record<string, MonevQuarters> = {};
+
+    MANDATORY_CONTROLS_CATALOG.forEach((ctrl, cIdx) => {
+      const ev = evMap.get(`${satker.uniqueId}::${ctrl.code}`);
+      const isNa = Boolean(ctrl.courtOnly && satker.upgLevel === 'UPG Tingkat 1');
+      const isFilled = Boolean(
+        !isNa && ev && ev.status === 'Sudah Diisi' && ev.buktiUrl
+      );
+      const seed = sIdx * 13 + cIdx * 7;
+
+      if (isNa) {
+        entries[ctrl.code] = {
+          mandiriScore: null,
+          evaluatorScore: null,
+          buktiUrl: '',
+          catatanPusat: 'Khusus satuan kerja pengadilan (N/A).',
+        };
+        quarters[ctrl.code] = ['—', '—', '—', '—'];
+        return;
+      }
+
+      if (status === 'Belum Lapor') {
+        entries[ctrl.code] = {
+          mandiriScore: null,
+          evaluatorScore: null,
+          buktiUrl: ev?.buktiUrl ?? '',
+          catatanPusat: '',
+        };
+        quarters[ctrl.code] = buildQuarterTuple(status, false, seed);
+        return;
+      }
+
+      let mandiriScore: number;
+      if (!isFilled) {
+        mandiriScore = 0;
+      } else if (ev?.klaimEfektivitas === 'Efektif') {
+        mandiriScore = seed % 5 === 0 ? 75 : 100;
+      } else {
+        mandiriScore = 75;
+      }
+
+      let evaluatorScore: EvaluatorStepScore | null = null;
+      let catatanPusat = '';
+
+      if (status === 'Terverifikasi') {
+        if (!isFilled) {
+          evaluatorScore = 0;
+          catatanPusat = 'Bukti dukung belum diunggah.';
+        } else if (mandiriScore === 100 && seed % 6 === 0) {
+          evaluatorScore = 75;
+          catatanPusat = 'Bukti valid, perlu kelengkapan daftar hadir berjenjang.';
+        } else {
+          evaluatorScore = (mandiriScore as EvaluatorStepScore);
+          catatanPusat = 'Terverifikasi sesuai bukti dukung HTTPS.';
+        }
+      } else if (status === 'Perlu Revisi') {
+        if (!isFilled) {
+          evaluatorScore = 0;
+          catatanPusat = 'Mohon lengkapi tautan bukti dukung HTTPS.';
+        } else if (seed % 4 === 0) {
+          evaluatorScore = 50;
+          catatanPusat = 'Tautan perlu disertai SK atau dokumentasi tanggal pelaksanaan.';
+        } else {
+          evaluatorScore = 75;
+          catatanPusat = '';
+        }
+      } else {
+        // Menunggu Uji: pre-fill some suggested or null so Pusat tests live
+        evaluatorScore = null;
+        catatanPusat = '';
+      }
+
+      entries[ctrl.code] = {
+        mandiriScore,
+        evaluatorScore,
+        buktiUrl: ev?.buktiUrl ?? '',
+        catatanPusat,
+      };
+      quarters[ctrl.code] = buildQuarterTuple(status, isFilled, seed);
+    });
+
+    const key = `${year}::${satker.uniqueId}`;
+    records[key] = {
+      key,
+      year,
+      satkerUniqueId: satker.uniqueId,
+      status,
+      revisionNote:
+        status === 'Perlu Revisi'
+          ? 'Mohon melengkapi tautan bukti dukung yang masih kosong serta memperjelas dokumentasi sosialisasi.'
+          : '',
+      entries,
+      quarters,
+      updatedAt:
+        status === 'Belum Lapor' ? '' : '2026-03-26T10:15:00.000Z',
+    };
+  });
+
+  return records;
+}
+

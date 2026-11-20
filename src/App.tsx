@@ -11,12 +11,15 @@ import { MonevPPGPage } from './components/pages/MonevPPGPage';
 import { PengawasanRegulerPage } from './components/pages/PengawasanRegulerPage';
 import { PenilaianRisikoPage } from './components/pages/PenilaianRisikoPage';
 import {
+  buildInitialMonevPusatRecords,
+  computeMonevPusatTotals,
   createDefaultRiskMatrix,
   INITIAL_ALL_ASSESSMENTS,
   INITIAL_AUDIT_KINERJA,
   INITIAL_MANDATORY_EVIDENCES,
   INITIAL_PENGAWASAN_REGULER,
   INITIAL_SATKER_EVAL_SCORES,
+  MASTER_SATKER_LIST,
   normalizeRiskCategory,
   PAGE_META,
   RISK_CONTROL_LIBRARY,
@@ -25,6 +28,7 @@ import {
   AnnualEvalSatkerRecord,
   AuditKinerjaItem,
   ControlAssessmentEntry,
+  MonevPusatSatkerRecord,
   MonevSatkerRecord,
   PageId,
   PengawasanRegulerItem,
@@ -50,6 +54,7 @@ interface PersistedState {
   auditKinerja: AuditKinerjaItem[];
   mandatoryEvidences: SatkerMandatoryEvidence[];
   satkerScores: Record<string, SatkerEvalScore>;
+  monevPusatRecords: Record<string, MonevPusatSatkerRecord>;
 }
 
 function normalizeUserRole(raw: unknown): UserRole {
@@ -97,6 +102,12 @@ function normalizePersistedAssessment(
 }
 
 function loadInitialState(): PersistedState {
+  const initialMonevPusat = buildInitialMonevPusatRecords(
+    '2026',
+    MASTER_SATKER_LIST,
+    INITIAL_MANDATORY_EVIDENCES
+  );
+
   const fallback: PersistedState = {
     year: '2026',
     userRole: 'UPG Pusat',
@@ -109,6 +120,7 @@ function loadInitialState(): PersistedState {
     auditKinerja: INITIAL_AUDIT_KINERJA,
     mandatoryEvidences: INITIAL_MANDATORY_EVIDENCES,
     satkerScores: INITIAL_SATKER_EVAL_SCORES,
+    monevPusatRecords: initialMonevPusat,
   };
 
   try {
@@ -140,6 +152,12 @@ function loadInitialState(): PersistedState {
       ];
     }
 
+    const loadedEvidences =
+      Array.isArray(parsed.mandatoryEvidences) &&
+      parsed.mandatoryEvidences.length > 0
+        ? parsed.mandatoryEvidences
+        : fallback.mandatoryEvidences;
+
     return {
       year: parsed.year || '2026',
       userRole: normalizeUserRole(parsed.userRole),
@@ -159,15 +177,20 @@ function loadInitialState(): PersistedState {
       auditKinerja: Array.isArray(parsed.auditKinerja)
         ? parsed.auditKinerja
         : fallback.auditKinerja,
-      mandatoryEvidences:
-        Array.isArray(parsed.mandatoryEvidences) &&
-        parsed.mandatoryEvidences.length > 0
-          ? parsed.mandatoryEvidences
-          : fallback.mandatoryEvidences,
+      mandatoryEvidences: loadedEvidences,
       satkerScores:
         parsed.satkerScores && Object.keys(parsed.satkerScores).length > 0
           ? parsed.satkerScores
           : fallback.satkerScores,
+      monevPusatRecords:
+        parsed.monevPusatRecords &&
+        Object.keys(parsed.monevPusatRecords).length > 0
+          ? parsed.monevPusatRecords
+          : buildInitialMonevPusatRecords(
+              parsed.year || '2026',
+              MASTER_SATKER_LIST,
+              loadedEvidences
+            ),
     };
   } catch {
     return fallback;
@@ -205,9 +228,12 @@ export default function App() {
   const [mandatoryEvidences, setMandatoryEvidences] = useState<
     SatkerMandatoryEvidence[]
   >(initial.mandatoryEvidences);
-  const [satkerScores] = useState<Record<string, SatkerEvalScore>>(
-    initial.satkerScores
-  );
+  const [satkerScores, setSatkerScores] = useState<
+    Record<string, SatkerEvalScore>
+  >(initial.satkerScores);
+  const [monevPusatRecords, setMonevPusatRecords] = useState<
+    Record<string, MonevPusatSatkerRecord>
+  >(initial.monevPusatRecords);
 
   // Pre-selected target when clicking Edit from Dashboard PPG
   const [riskEditTarget, setRiskEditTarget] = useState<{
@@ -229,6 +255,7 @@ export default function App() {
         auditKinerja,
         mandatoryEvidences,
         satkerScores,
+        monevPusatRecords,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch {
@@ -246,6 +273,7 @@ export default function App() {
     auditKinerja,
     mandatoryEvidences,
     satkerScores,
+    monevPusatRecords,
   ]);
 
   const handleSaveAssessment = (record: RiskAssessmentRecord) => {
@@ -371,6 +399,37 @@ export default function App() {
       }
       return [...prev, updated];
     });
+  };
+
+  const handleSaveMonevPusatRecord = (record: MonevPusatSatkerRecord) => {
+    setMonevPusatRecords((prev) => ({
+      ...prev,
+      [record.key]: record,
+    }));
+
+    const satker = MASTER_SATKER_LIST.find(
+      (s) => s.uniqueId === record.satkerUniqueId
+    );
+    if (satker) {
+      const { mandiriPct, evaluatorPct } = computeMonevPusatTotals(
+        record.entries,
+        satker.upgLevel
+      );
+      setSatkerScores((prev) => ({
+        ...prev,
+        [satker.uniqueId]: {
+          satkerUniqueId: satker.uniqueId,
+          mandiriScore:
+            mandiriPct !== null
+              ? mandiriPct
+              : (prev[satker.uniqueId]?.mandiriScore ?? null),
+          evaluatorScore:
+            evaluatorPct !== null
+              ? evaluatorPct
+              : (prev[satker.uniqueId]?.evaluatorScore ?? null),
+        },
+      }));
+    }
   };
 
   const canViewEvaluatorPages =
@@ -504,7 +563,9 @@ export default function App() {
                 <span className="text-[12px] text-[#dcecff]">
                   {effectivePage === 'ppg-dashboard' && userRole === 'UPG Pusat'
                     ? 'Data PPG MA RI, Kontrol Wajib UPG Pusat & Rekapitulasi Capaian Jenjang'
-                    : meta.subtitle}
+                    : effectivePage === 'ppg-monev' && userRole === 'UPG Pusat'
+                      ? 'Meja Kerja Verifikasi Evaluasi Tahunan & Monitoring Triwulanan UPG Pusat'
+                      : meta.subtitle}
                 </span>
               </div>
 
@@ -569,8 +630,12 @@ export default function App() {
               userRole={userRole}
               monevRecords={monevRecords}
               annualRecords={annualRecords}
+              monevPusatRecords={monevPusatRecords}
+              mandatoryEvidences={mandatoryEvidences}
+              satkerScores={satkerScores}
               onSaveMonev={handleSaveMonev}
               onSaveAnnualRecord={handleSaveAnnualRecord}
+              onSaveMonevPusatRecord={handleSaveMonevPusatRecord}
             />
           )}
         </div>

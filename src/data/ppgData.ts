@@ -20,15 +20,21 @@ import {
 } from '../types/upg';
 import {
   buildInitialMandatoryEvidences,
+  buildInitialMonevPusatRecords,
   buildInitialTierSampleAssessments,
+  computeMonevPusatTotals,
   INITIAL_SATKER_EVAL_SCORES,
+  MANDATORY_CONTROL_WEIGHTS,
   MANDATORY_CONTROLS_CATALOG,
   MANDATORY_PROGRAM_GROUPS,
 } from './mandatoryControlsData';
 import { RISK_CONTROL_LIBRARY } from './riskCatalogData';
 
 export {
+  buildInitialMonevPusatRecords,
+  computeMonevPusatTotals,
   INITIAL_SATKER_EVAL_SCORES,
+  MANDATORY_CONTROL_WEIGHTS,
   MANDATORY_CONTROLS_CATALOG,
   MANDATORY_PROGRAM_GROUPS,
   RISK_CONTROL_LIBRARY,
