@@ -12,9 +12,11 @@ import { PengawasanRegulerPage } from './components/pages/PengawasanRegulerPage'
 import { PenilaianRisikoPage } from './components/pages/PenilaianRisikoPage';
 import {
   createDefaultRiskMatrix,
+  INITIAL_ALL_ASSESSMENTS,
   INITIAL_AUDIT_KINERJA,
-  INITIAL_BADAN_PENGAWASAN_ASSESSMENTS,
+  INITIAL_MANDATORY_EVIDENCES,
   INITIAL_PENGAWASAN_REGULER,
+  INITIAL_SATKER_EVAL_SCORES,
   normalizeRiskCategory,
   PAGE_META,
   RISK_CONTROL_LIBRARY,
@@ -29,6 +31,8 @@ import {
   RiskAssessmentRecord,
   RiskLibraryItem,
   RiskMatrixConfig,
+  SatkerEvalScore,
+  SatkerMandatoryEvidence,
   UserRole,
 } from './types/upg';
 
@@ -44,6 +48,8 @@ interface PersistedState {
   annualRecords: Record<string, AnnualEvalSatkerRecord>;
   pengawasanReguler: PengawasanRegulerItem[];
   auditKinerja: AuditKinerjaItem[];
+  mandatoryEvidences: SatkerMandatoryEvidence[];
+  satkerScores: Record<string, SatkerEvalScore>;
 }
 
 function normalizeUserRole(raw: unknown): UserRole {
@@ -94,13 +100,15 @@ function loadInitialState(): PersistedState {
   const fallback: PersistedState = {
     year: '2026',
     userRole: 'UPG Pusat',
-    assessments: INITIAL_BADAN_PENGAWASAN_ASSESSMENTS,
+    assessments: INITIAL_ALL_ASSESSMENTS,
     riskCatalog: RISK_CONTROL_LIBRARY,
     riskMatrix: createDefaultRiskMatrix(),
     monevRecords: {},
     annualRecords: {},
     pengawasanReguler: INITIAL_PENGAWASAN_REGULER,
     auditKinerja: INITIAL_AUDIT_KINERJA,
+    mandatoryEvidences: INITIAL_MANDATORY_EVIDENCES,
+    satkerScores: INITIAL_SATKER_EVAL_SCORES,
   };
 
   try {
@@ -114,12 +122,28 @@ function loadInitialState(): PersistedState {
       });
     }
 
+    let loadedAssessments = Array.isArray(parsed.assessments)
+      ? parsed.assessments.map(normalizePersistedAssessment)
+      : fallback.assessments;
+
+    // Backfill non-Bawas tier sample assessments if migrating from earlier Bawas-only storage
+    const hasNonBawas = loadedAssessments.some(
+      (a) => a.satkerUniqueId !== 'UPG Tingkat 1::1'
+    );
+    if (!hasNonBawas) {
+      const existingIds = new Set(loadedAssessments.map((a) => a.id));
+      loadedAssessments = [
+        ...loadedAssessments,
+        ...INITIAL_ALL_ASSESSMENTS.filter(
+          (a) => a.satkerUniqueId !== 'UPG Tingkat 1::1' && !existingIds.has(a.id)
+        ),
+      ];
+    }
+
     return {
       year: parsed.year || '2026',
       userRole: normalizeUserRole(parsed.userRole),
-      assessments: Array.isArray(parsed.assessments)
-        ? parsed.assessments.map(normalizePersistedAssessment)
-        : fallback.assessments,
+      assessments: loadedAssessments,
       riskCatalog:
         Array.isArray(parsed.riskCatalog) && parsed.riskCatalog.length > 0
           ? parsed.riskCatalog
@@ -135,6 +159,15 @@ function loadInitialState(): PersistedState {
       auditKinerja: Array.isArray(parsed.auditKinerja)
         ? parsed.auditKinerja
         : fallback.auditKinerja,
+      mandatoryEvidences:
+        Array.isArray(parsed.mandatoryEvidences) &&
+        parsed.mandatoryEvidences.length > 0
+          ? parsed.mandatoryEvidences
+          : fallback.mandatoryEvidences,
+      satkerScores:
+        parsed.satkerScores && Object.keys(parsed.satkerScores).length > 0
+          ? parsed.satkerScores
+          : fallback.satkerScores,
     };
   } catch {
     return fallback;
@@ -145,9 +178,7 @@ export default function App() {
   const [initial] = useState<PersistedState>(() => loadInitialState());
   const [userRole, setUserRole] = useState<UserRole>(initial.userRole);
   const [activePage, setActivePage] = useState<PageId>(() =>
-    initial.userRole === 'Satker' || initial.userRole === 'UPG Pusat'
-      ? 'ppg-risiko'
-      : 'ppg-dashboard'
+    initial.userRole === 'Satker' ? 'ppg-risiko' : 'ppg-dashboard'
   );
   const [year, setYear] = useState<string>(initial.year);
   const [assessments, setAssessments] = useState<RiskAssessmentRecord[]>(
@@ -171,6 +202,12 @@ export default function App() {
   const [auditKinerja, setAuditKinerja] = useState<AuditKinerjaItem[]>(
     initial.auditKinerja
   );
+  const [mandatoryEvidences, setMandatoryEvidences] = useState<
+    SatkerMandatoryEvidence[]
+  >(initial.mandatoryEvidences);
+  const [satkerScores] = useState<Record<string, SatkerEvalScore>>(
+    initial.satkerScores
+  );
 
   // Pre-selected target when clicking Edit from Dashboard PPG
   const [riskEditTarget, setRiskEditTarget] = useState<{
@@ -190,6 +227,8 @@ export default function App() {
         annualRecords,
         pengawasanReguler,
         auditKinerja,
+        mandatoryEvidences,
+        satkerScores,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch {
@@ -205,6 +244,8 @@ export default function App() {
     annualRecords,
     pengawasanReguler,
     auditKinerja,
+    mandatoryEvidences,
+    satkerScores,
   ]);
 
   const handleSaveAssessment = (record: RiskAssessmentRecord) => {
@@ -318,6 +359,18 @@ export default function App() {
     setAuditKinerja((prev) =>
       prev.map((item) => (item.id === updated.id ? updated : item))
     );
+  };
+
+  const handleSaveMandatoryEvidence = (updated: SatkerMandatoryEvidence) => {
+    setMandatoryEvidences((prev) => {
+      const idx = prev.findIndex((item) => item.id === updated.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = updated;
+        return next;
+      }
+      return [...prev, updated];
+    });
   };
 
   const canViewEvaluatorPages =
@@ -449,7 +502,9 @@ export default function App() {
                   {meta.title}
                 </h1>
                 <span className="text-[12px] text-[#dcecff]">
-                  {meta.subtitle}
+                  {effectivePage === 'ppg-dashboard' && userRole === 'UPG Pusat'
+                    ? 'Data PPG MA RI, Kontrol Wajib UPG Pusat & Rekapitulasi Capaian Jenjang'
+                    : meta.subtitle}
                 </span>
               </div>
 
@@ -495,9 +550,13 @@ export default function App() {
 
           {effectivePage === 'ppg-dashboard' && (
             <DashboardPPGPage
+              year={year}
               userRole={userRole}
               assessments={assessments}
               riskMatrix={riskMatrix}
+              mandatoryEvidences={mandatoryEvidences}
+              satkerScores={satkerScores}
+              onSaveMandatoryEvidence={handleSaveMandatoryEvidence}
               onOpenRiskFormForSatker={handleOpenRiskFormForSatker}
               onOpenNewRiskForm={handleOpenNewRiskForm}
             />

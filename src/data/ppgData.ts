@@ -18,9 +18,21 @@ import {
   RiskMatrixGrid,
   UpgLevel,
 } from '../types/upg';
+import {
+  buildInitialMandatoryEvidences,
+  buildInitialTierSampleAssessments,
+  INITIAL_SATKER_EVAL_SCORES,
+  MANDATORY_CONTROLS_CATALOG,
+  MANDATORY_PROGRAM_GROUPS,
+} from './mandatoryControlsData';
 import { RISK_CONTROL_LIBRARY } from './riskCatalogData';
 
-export { RISK_CONTROL_LIBRARY };
+export {
+  INITIAL_SATKER_EVAL_SCORES,
+  MANDATORY_CONTROLS_CATALOG,
+  MANDATORY_PROGRAM_GROUPS,
+  RISK_CONTROL_LIBRARY,
+};
 
 export const PAGE_META: Record<
   PageId,
@@ -496,6 +508,14 @@ export const INITIAL_BADAN_PENGAWASAN_ASSESSMENTS: RiskAssessmentRecord[] = [
     '2026'
   ),
 ];
+
+export const INITIAL_ALL_ASSESSMENTS: RiskAssessmentRecord[] = [
+  ...INITIAL_BADAN_PENGAWASAN_ASSESSMENTS,
+  ...buildInitialTierSampleAssessments(MASTER_SATKER_LIST),
+];
+
+export const INITIAL_MANDATORY_EVIDENCES =
+  buildInitialMandatoryEvidences(MASTER_SATKER_LIST);
 
 // Program & Kegiatan sesuai gambar Matriks Evaluasi Tahunan & Matriks Monitoring Triwulanan
 export const MONEV_ACTIVITIES: MonevActivityItem[] = [

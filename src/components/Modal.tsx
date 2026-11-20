@@ -8,6 +8,7 @@ interface ModalProps {
   onSave?: () => void;
   saveLabel?: string;
   showFooter?: boolean;
+  maxWidthClass?: string;
   children: React.ReactNode;
 }
 
@@ -18,6 +19,7 @@ export function Modal({
   onSave,
   saveLabel = 'Simpan',
   showFooter = true,
+  maxWidthClass = 'max-w-[680px]',
   children,
 }: ModalProps) {
   useEffect(() => {
@@ -41,7 +43,9 @@ export function Modal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-[680px] max-h-[90vh] overflow-auto rounded-lg bg-white shadow-[0_20px_60px_rgba(16,36,60,0.33)]">
+      <div
+        className={`w-full ${maxWidthClass} max-h-[90vh] overflow-auto rounded-lg bg-white shadow-[0_20px_60px_rgba(16,36,60,0.33)]`}
+      >
         <div className="flex items-center justify-between border-b border-[#dce3eb] px-5 py-4">
           <h2 id="modal-title" className="text-[15px] font-bold text-[#243247] m-0">
             {title}

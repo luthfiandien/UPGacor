@@ -181,3 +181,41 @@ export interface AuditKinerjaItem {
   notisi: string;
   laporan: string;
 }
+
+export type MandatoryProgramGroup =
+  | '1. Perangkat pengendalian'
+  | '2. Sosialisasi'
+  | '3. Diseminasi & e-learning'
+  | '6. Pelaporan'
+  | '7. Apresiasi & inovasi';
+
+export interface MandatoryControlDefinition {
+  code: string;
+  name: string;
+  programGroup: MandatoryProgramGroup;
+  courtOnly?: boolean;
+}
+
+export type MandatoryEvidenceStatus =
+  | 'Sudah Diisi'
+  | 'Belum Diisi'
+  | 'Khusus Pengadilan';
+
+export interface SatkerMandatoryEvidence {
+  id: string; // `${satkerUniqueId}::${controlCode}`
+  satkerUniqueId: string;
+  controlCode: string;
+  status: MandatoryEvidenceStatus;
+  klaimEfektivitas: ControlEffectivenessClaim | 'N/A';
+  buktiUrl: string;
+  periode: QuarterPeriod;
+  catatan: string;
+  updatedAt: string;
+}
+
+export interface SatkerEvalScore {
+  satkerUniqueId: string;
+  mandiriScore: number | null;
+  evaluatorScore: number | null;
+}
+
